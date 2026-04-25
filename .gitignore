@@ -1,0 +1,65 @@
+# ── Build artifacts ──────────────────────────────
+build/
+*.elf
+*.hex
+*.bin
+*.map
+*.lst
+*.a
+
+# ── Zephyr generated ─────────────────────────────
+zephyr.dts
+zephyr_pre0.*
+autoconf.h
+devicetree_generated.h
+*.dts.pre
+*.dts.pre.tmp
+version.h
+
+# ── CMake ────────────────────────────────────────
+CMakeCache.txt
+CMakeFiles/
+cmake_install.cmake
+Makefile
+build.ninja
+.ninja_deps
+.ninja_log
+ninja.build
+_sysbuild/
+
+# ── West ─────────────────────────────────────────
+.west/
+
+# ── Python ───────────────────────────────────────
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.venv/
+venv/
+
+# ── Editor ───────────────────────────────────────
+.vscode/settings.json
+.vscode/launch.json
+.vscode/*.log
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db
+
+# ── Secrets — NEVER commit ─────────────────────
+# AES Key is hardcoded in hal_sim.c for simulation purposes only.
+# When integrating ATECC608B, the key will not be present in the code.
+secrets.h
+*.key
+*.pem
+*.p12
+*.pfx
+aws_credentials
+.env
+
+# ── nRF Connect / Zephyr cache ───────────────────
+.cache/
+*.conf.old
+*.conf.bak
