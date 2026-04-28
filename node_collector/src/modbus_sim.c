@@ -27,11 +27,11 @@ void modbus_sim_init(void)
 void modbus_sim_tick(uint16_t seq)
 {
     /*
-     * Simula variazioni realistiche della macchina
-     * ad ogni ciclo di polling.
+     * Simulates realistic data of the machine
+     * every time it's polled. This allows testing the full data flow.
      *
-     * In produzione questo blocco non esiste —
-     * i valori vengono letti dal PLC reale via UART.
+     * This block doesn't exists in production —
+     * Values are read from the real PLC via UART.
      */
 
     /* Temperatura oscilla tra 20.0 e 35.0 C */
@@ -71,12 +71,12 @@ int modbus_sim_read_registers(uint16_t *regs, uint8_t count)
     }
 
     /*
-     * Simula il comportamento di:
+     * Simulates the behavior of:
      *   TX: device_addr(1) + FC(0x03) + start_reg(2) + count(2) + CRC(2)
      *   RX: device_addr(1) + FC(0x03) + byte_count(1) + data(N*2) + CRC(2)
      *
-     * Adesso: copia direttamente da sim_regs
-     * Dopo:   UART write + read con timeout e CRC check
+     * Currently: copies directly from sim_regs
+     * Later:   UART write + read with timeout and CRC check
      */
     memcpy(regs, sim_regs, count * sizeof(uint16_t));
     return 0;
