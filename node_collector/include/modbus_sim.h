@@ -4,46 +4,46 @@
 #include <stdint.h>
 
 /*
- * Simulatore Modbus RTU slave
+ * Modbus RTU slave simulator — emulates a Technowrapp PLC.
  *
- * Emula i registri di un PLC Technowrapp.
- * Adesso: valori simulati in RAM
- * Dopo:   lettura reale via MAX3485 + UART
+ * Now:  simulated values in RAM
+ * Later: real reads via MAX3485 + UART (Modbus FC 0x03)
  *
- * Mappa registri (da confermare con Technowrapp):
- *   40001 — temperatura motore (x10, es. 235 = 23.5 C)
- *   40002 — umidita' (x2, es. 130 = 65.0 %)
- *   40003 — vibrazione (x64, es. 80 = 1.25 g)
- *   40004 — pressione HIGH word (offset -300, x16)
- *   40005 — pressione LOW word
- *   40006 — cicli PLC HIGH word
- *   40007 — cicli PLC LOW word (cicli = HIGH<<16 | LOW)
- *   40008 — ore funzionamento
- *   40009 — status flags (bit 0 = running, bit 1 = alarm)
+ * Register map (to be confirmed with Technowrapp):
+ *   40001 — machine state code
+ *   40002 — pallet_id HIGH word
+ *   40003 — pallet_id LOW word
+ *   40004 — wrap_time             (seconds)
+ *   40005 — wrap_transit_time     (seconds)
+ *   40006 — pallet_rotations
+ *   40007 — program_number
+ *   40008 — pallet_perimeter      (unit TBD with Technowrapp)
+ *   40009 — running_seconds HIGH word
+ *   40010 — running_seconds LOW word
+ *   40011 — alarm_seconds HIGH word
+ *   40012 — alarm_seconds LOW word
+ *   40013 — timestamp HIGH word
+ *   40014 — timestamp LOW word    (Unix epoch)
  */
 
-#define MB_REG_TEMP        0   /* 40001 */
-#define MB_REG_HUMIDITY    1   /* 40002 */
-#define MB_REG_VIBRATION   2   /* 40003 */
-#define MB_REG_PRES_HIGH   3   /* 40004 */
-#define MB_REG_PRES_LOW    4   /* 40005 */
-#define MB_REG_CYCLES_HIGH 5   /* 40006 */
-#define MB_REG_CYCLES_LOW  6   /* 40007 */
-#define MB_REG_HOURS       7   /* 40008 */
-#define MB_REG_STATUS      8   /* 40009 */
-#define MB_NUM_REGS        9
+#define MB_REG_STATE         0   /* 40001 */
+#define MB_REG_PALLET_HIGH   1   /* 40002 */
+#define MB_REG_PALLET_LOW    2   /* 40003 */
+#define MB_REG_WRAP_TIME     3   /* 40004 */
+#define MB_REG_WRAP_TRANSIT  4   /* 40005 */
+#define MB_REG_ROTATIONS     5   /* 40006 */
+#define MB_REG_PROGRAM       6   /* 40007 */
+#define MB_REG_PERIMETER     7   /* 40008 */
+#define MB_REG_RUN_HIGH      8   /* 40009 */
+#define MB_REG_RUN_LOW       9   /* 40010 */
+#define MB_REG_ALARM_HIGH   10   /* 40011 */
+#define MB_REG_ALARM_LOW    11   /* 40012 */
+#define MB_REG_TS_HIGH      12   /* 40013 */
+#define MB_REG_TS_LOW       13   /* 40014 */
+#define MB_NUM_REGS         14
 
-/* Init: popola i registri con valori iniziali */
 void modbus_sim_init(void);
-
-/*
- * Simula un poll Modbus — legge i registri e li aggiorna.
- * Adesso: incrementa i valori ad ogni chiamata
- * Dopo:   UART TX Function Code 0x03 + RX response
- */
-int modbus_sim_read_registers(uint16_t *regs, uint8_t count);
-
-/* Aggiorna i registri simulati (simula variazioni macchina) */
+int  modbus_sim_read_registers(uint16_t *regs, uint8_t count);
 void modbus_sim_tick(uint16_t seq);
 
-#endif
+#endif /* MODBUS_SIM_H */

@@ -1,3 +1,7 @@
+export PATH=$PATH:"/c/Program Files/qemu"
+
+cd node_collector
+
 west build -b qemu_cortex_m3 --pristine
 
 west build -t run -d build/node_gateway
