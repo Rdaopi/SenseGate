@@ -4,7 +4,7 @@
 #include <string.h>
 #include <zephyr/sys/printk.h>
 
-static hal_role_t sim_role = HAL_ROLE_SLAVE;
+static hal_role_t sim_role = HAL_ROLE_MASTER; // static has_role_t sim_role = HAL_ROLE_SLAVE;
 static uint16_t   sim_seq  = 0;
 
 /* Pacchetto finto — simula quello che manda il collector */
@@ -77,6 +77,7 @@ int hal_modem_send_sms(const uint8_t *payload, size_t len)
 
 hal_role_t hal_get_role(void)
 {
+    
     return sim_role;
 }
 

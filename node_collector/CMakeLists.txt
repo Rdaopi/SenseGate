@@ -13,4 +13,5 @@ target_sources(app PRIVATE
     ../lib/payload_packer.c
     ../lib/rolling_buffer.c
     ../lib/store_forward.c
+    src/test_runner.c
 )

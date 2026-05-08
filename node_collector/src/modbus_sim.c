@@ -7,22 +7,19 @@ static uint16_t sim_regs[MB_NUM_REGS];
 void modbus_sim_init(void)
 {
     sim_regs[MB_REG_STATE]        = 30;
-    sim_regs[MB_REG_PALLET_HIGH]  = 2;
-    sim_regs[MB_REG_PALLET_LOW]   = 0x6F4B;   /* total: 159307 */
-    sim_regs[MB_REG_WRAP_TIME]    = 458;
-    sim_regs[MB_REG_WRAP_TRANSIT] = 710;
-    sim_regs[MB_REG_ROTATIONS]    = 830;
-    sim_regs[MB_REG_PROGRAM]      = 15;
-    sim_regs[MB_REG_PERIMETER]    = 3;
+    sim_regs[MB_REG_PALLET_HIGH]  = (159307 >> 16) & 0xFFFF;
+    sim_regs[MB_REG_PALLET_LOW]   = 159307 & 0xFFFF;
+    sim_regs[MB_REG_WRAP_TIME]    = 458;      /* valore reale dal dataset */
+    sim_regs[MB_REG_WRAP_TRANSIT] = 710;      /* valore reale dal dataset */
+    sim_regs[MB_REG_ROTATIONS]    = 15;       /* valore reale dal dataset */
+    sim_regs[MB_REG_PROGRAM]      = 0;        /* sempre 0 dai dati reali */
+    sim_regs[MB_REG_PERIMETER]    = 3;        /* sempre 3 dai dati reali */
     sim_regs[MB_REG_RUN_HIGH]     = 0;
-    sim_regs[MB_REG_RUN_LOW]      = 0;
+    sim_regs[MB_REG_RUN_LOW]      = 4000;     /* 4000 dai dati reali */
     sim_regs[MB_REG_ALARM_HIGH]   = 0;
     sim_regs[MB_REG_ALARM_LOW]    = 0;
-    sim_regs[MB_REG_TS_HIGH]      = 0x6993;
-    sim_regs[MB_REG_TS_LOW]       = 0x5550;
-
-    printk("[MODBUS SIM] Initialized with %d registers (TWIKO layout)\n",
-           MB_NUM_REGS);
+    sim_regs[MB_REG_TS_HIGH]      = (1774605738U >> 16) & 0xFFFF;
+    sim_regs[MB_REG_TS_LOW]       = 1774605738U & 0xFFFF;
 }
 
 void modbus_sim_tick(uint16_t seq)
