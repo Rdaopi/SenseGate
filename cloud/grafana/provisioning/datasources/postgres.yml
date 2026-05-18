@@ -1,0 +1,20 @@
+apiVersion: 1
+
+datasources:
+  - name: SenseGate PostgreSQL
+    type: postgres
+    uid: sensegate-pg
+    url: db:5432
+    database: sensegate
+    user: sensegate
+    secureJsonData:
+      password: sensegate
+    jsonData:
+      sslmode: disable
+      maxOpenConns: 10
+      maxIdleConns: 10
+      connMaxLifetime: 14400
+      postgresVersion: 1500
+      timescaledb: false
+    isDefault: true
+    editable: true

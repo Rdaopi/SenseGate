@@ -1,0 +1,58 @@
+version: "3.9"
+
+services:
+
+  db:
+    image: postgres:15-alpine
+    container_name: sensegate_db
+    environment:
+      POSTGRES_DB:       sensegate
+      POSTGRES_USER:     sensegate
+      POSTGRES_PASSWORD: sensegate
+    ports:
+      - "5432:5432"
+    volumes:
+      - ./database/schema.sql:/docker-entrypoint-initdb.d/01_schema.sql:ro
+      - ./database/seed.sql:/docker-entrypoint-initdb.d/02_seed.sql:ro
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U sensegate"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  lambda:
+    build:
+      context: ./lambda
+      dockerfile: Dockerfile.sim
+    container_name: sensegate_lambda
+    ports:
+      - "8080:8080"
+    environment:
+      AES_KEY:    "2B7E151628AED2A6ABF7158809CF4F3C"
+      DB_URL:     "postgresql://sensegate:sensegate@db:5432/sensegate"
+      MSISDN_MAP: '{"3912345678": 1}'
+      PORT:       "8080"
+    depends_on:
+      db:
+        condition: service_healthy
+
+  grafana:
+    image: grafana/grafana:10.4.2
+    container_name: sensegate_grafana
+    ports:
+      - "3000:3000"
+    environment:
+      GF_SECURITY_ADMIN_PASSWORD: admin
+      GF_AUTH_ANONYMOUS_ENABLED:  "true"
+      GF_AUTH_ANONYMOUS_ORG_ROLE: Viewer
+    volumes:
+      - ./grafana/provisioning:/etc/grafana/provisioning:ro
+      - grafana_data:/var/lib/grafana
+    depends_on:
+      db:
+        condition: service_healthy
+
+volumes:
+  pgdata:
+  grafana_data:

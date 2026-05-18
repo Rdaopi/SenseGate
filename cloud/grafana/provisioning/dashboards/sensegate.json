@@ -1,0 +1,216 @@
+{
+  "uid": "sensegate-main",
+  "title": "SenseGate — Technowrapp IIoT",
+  "description": "Predictive maintenance dashboard for Technowrapp wrapping machines",
+  "schemaVersion": 38,
+  "version": 1,
+  "refresh": "30s",
+  "time": { "from": "now-6h", "to": "now" },
+  "timezone": "browser",
+  "tags": ["sensegate", "iiot", "technowrapp"],
+  "panels": [
+    {
+      "id": 1,
+      "type": "stat",
+      "title": "Machine State",
+      "gridPos": { "h": 4, "w": 4, "x": 0, "y": 0 },
+      "datasource": { "type": "postgres", "uid": "sensegate-pg" },
+      "options": {
+        "colorMode": "background",
+        "graphMode": "none",
+        "justifyMode": "center",
+        "orientation": "auto",
+        "reduceOptions": { "calcs": ["lastNotNull"] }
+      },
+      "fieldConfig": {
+        "defaults": {
+          "mappings": [
+            { "options": { "30": { "text": "RUNNING", "color": "green" }, "31": { "text": "ALARM",   "color": "orange" }, "99": { "text": "OFFLINE", "color": "red" } }, "type": "value" }
+          ],
+          "thresholds": { "mode": "absolute", "steps": [{ "color": "green", "value": null }] }
+        }
+      },
+      "targets": [
+        {
+          "rawSql": "SELECT NOW() AS time, state FROM sensor_readings WHERE device_id=1 ORDER BY time DESC LIMIT 1",
+          "format": "table",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "id": 2,
+      "type": "stat",
+      "title": "Current Pallet ID",
+      "gridPos": { "h": 4, "w": 4, "x": 4, "y": 0 },
+      "datasource": { "type": "postgres", "uid": "sensegate-pg" },
+      "options": {
+        "colorMode": "value",
+        "graphMode": "none",
+        "reduceOptions": { "calcs": ["lastNotNull"] }
+      },
+      "fieldConfig": { "defaults": { "unit": "none", "thresholds": { "mode": "absolute", "steps": [{ "color": "blue", "value": null }] } } },
+      "targets": [
+        {
+          "rawSql": "SELECT NOW() AS time, pallet_id FROM sensor_readings WHERE device_id=1 ORDER BY time DESC LIMIT 1",
+          "format": "table",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "id": 3,
+      "type": "stat",
+      "title": "Total Packets Received",
+      "gridPos": { "h": 4, "w": 4, "x": 8, "y": 0 },
+      "datasource": { "type": "postgres", "uid": "sensegate-pg" },
+      "options": { "colorMode": "value", "graphMode": "area", "reduceOptions": { "calcs": ["lastNotNull"] } },
+      "fieldConfig": { "defaults": { "unit": "none", "thresholds": { "mode": "absolute", "steps": [{ "color": "purple", "value": null }] } } },
+      "targets": [
+        {
+          "rawSql": "SELECT NOW() AS time, COUNT(*) AS count FROM sensor_readings WHERE device_id=1",
+          "format": "table",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "id": 4,
+      "type": "stat",
+      "title": "Running Time Today (s)",
+      "gridPos": { "h": 4, "w": 4, "x": 12, "y": 0 },
+      "datasource": { "type": "postgres", "uid": "sensegate-pg" },
+      "options": { "colorMode": "value", "graphMode": "area", "reduceOptions": { "calcs": ["lastNotNull"] } },
+      "fieldConfig": { "defaults": { "unit": "s", "thresholds": { "mode": "absolute", "steps": [{ "color": "green", "value": null }] } } },
+      "targets": [
+        {
+          "rawSql": "SELECT NOW() AS time, MAX(running_seconds) AS running_seconds FROM sensor_readings WHERE device_id=1 AND time >= date_trunc('day', NOW())",
+          "format": "table",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "id": 5,
+      "type": "stat",
+      "title": "Alarm Time Today (s)",
+      "gridPos": { "h": 4, "w": 4, "x": 16, "y": 0 },
+      "datasource": { "type": "postgres", "uid": "sensegate-pg" },
+      "options": { "colorMode": "background", "graphMode": "area", "reduceOptions": { "calcs": ["lastNotNull"] } },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "thresholds": { "mode": "absolute", "steps": [{ "color": "green", "value": null }, { "color": "orange", "value": 60 }, { "color": "red", "value": 300 }] }
+        }
+      },
+      "targets": [
+        {
+          "rawSql": "SELECT NOW() AS time, MAX(alarm_seconds) AS alarm_seconds FROM sensor_readings WHERE device_id=1 AND time >= date_trunc('day', NOW())",
+          "format": "table",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "id": 6,
+      "type": "timeseries",
+      "title": "Machine State Over Time",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 4 },
+      "datasource": { "type": "postgres", "uid": "sensegate-pg" },
+      "options": { "tooltip": { "mode": "single" } },
+      "fieldConfig": {
+        "defaults": {
+          "custom": { "lineWidth": 2, "fillOpacity": 20 },
+          "mappings": [
+            { "options": { "30": { "text": "RUNNING" }, "31": { "text": "ALARM" }, "99": { "text": "OFFLINE" } }, "type": "value" }
+          ],
+          "thresholds": { "mode": "absolute", "steps": [{ "color": "green", "value": null }, { "color": "orange", "value": 31 }, { "color": "red", "value": 99 }] },
+          "color": { "mode": "thresholds" }
+        }
+      },
+      "targets": [
+        {
+          "rawSql": "SELECT time, state FROM sensor_readings WHERE device_id=1 AND $__timeFilter(time) ORDER BY time",
+          "format": "time_series",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "id": 7,
+      "type": "timeseries",
+      "title": "Wrap Time per Pallet (s)",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 4 },
+      "datasource": { "type": "postgres", "uid": "sensegate-pg" },
+      "options": { "tooltip": { "mode": "multi" } },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "custom": { "lineWidth": 2 },
+          "thresholds": { "mode": "absolute", "steps": [{ "color": "green", "value": null }] }
+        }
+      },
+      "targets": [
+        {
+          "rawSql": "SELECT time, wrap_time_s, wrap_transit_time_s FROM sensor_readings WHERE device_id=1 AND $__timeFilter(time) ORDER BY time",
+          "format": "time_series",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "id": 8,
+      "type": "table",
+      "title": "Recent Readings",
+      "gridPos": { "h": 10, "w": 24, "x": 0, "y": 12 },
+      "datasource": { "type": "postgres", "uid": "sensegate-pg" },
+      "options": { "sortBy": [{ "desc": true, "displayName": "time" }] },
+      "targets": [
+        {
+          "rawSql": "SELECT time, device_id, sequence, state_name, pallet_id, wrap_time_s, wrap_transit_time_s, pallet_rotations, running_seconds, alarm_seconds FROM sensor_readings WHERE device_id=1 AND $__timeFilter(time) ORDER BY time DESC LIMIT 50",
+          "format": "table",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "id": 9,
+      "type": "bargauge",
+      "title": "Pallets Processed (hourly)",
+      "gridPos": { "h": 6, "w": 12, "x": 0, "y": 22 },
+      "datasource": { "type": "postgres", "uid": "sensegate-pg" },
+      "options": { "orientation": "vertical", "reduceOptions": { "calcs": ["sum"] } },
+      "fieldConfig": { "defaults": { "unit": "none", "thresholds": { "mode": "absolute", "steps": [{ "color": "blue", "value": null }] } } },
+      "targets": [
+        {
+          "rawSql": "SELECT bucket AS time, pallets_processed FROM readings_hourly WHERE device_id=1 AND $__timeFilter(bucket) ORDER BY bucket",
+          "format": "time_series",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "id": 10,
+      "type": "timeseries",
+      "title": "Alarm Seconds Accumulated",
+      "gridPos": { "h": 6, "w": 12, "x": 12, "y": 22 },
+      "datasource": { "type": "postgres", "uid": "sensegate-pg" },
+      "options": { "tooltip": { "mode": "single" } },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "custom": { "lineWidth": 2, "fillOpacity": 30 },
+          "color": { "fixedColor": "orange", "mode": "fixed" },
+          "thresholds": { "mode": "absolute", "steps": [{ "color": "green", "value": null }, { "color": "red", "value": 120 }] }
+        }
+      },
+      "targets": [
+        {
+          "rawSql": "SELECT time, alarm_seconds FROM sensor_readings WHERE device_id=1 AND $__timeFilter(time) ORDER BY time",
+          "format": "time_series",
+          "refId": "A"
+        }
+      ]
+    }
+  ]
+}
