@@ -213,18 +213,22 @@ def sms():
         if found:
             seq, reading = found
             alerts = _detect_alerts(reading)
+            stored = False
             try:
                 conn = _get_db()
-                if not _is_duplicate(conn, reading["device_id"], reading["sequence"]):
-                    _insert_reading(conn, reading, from_number)
-                    conn.commit()
+                # SMS is a store-and-forward backup path — always insert even if
+                # the same sequence arrived via /ingest (different source tag).
+                _insert_reading(conn, reading, from_number)
+                conn.commit()
+                stored = True
             except Exception as exc:
                 logger.error("DB error: %s", exc)
                 try:
                     _get_db().rollback()
                 except Exception:
                     pass
-            results.append({"slot": i, "sequence": seq, "state": reading["state"], "alerts": alerts})
+            results.append({"slot": i, "sequence": seq, "state": reading["state"],
+                            "alerts": alerts, "stored": stored})
 
     return jsonify({"status": "ok", "results": results}), 200
 
