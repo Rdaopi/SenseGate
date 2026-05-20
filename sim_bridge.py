@@ -1,9 +1,14 @@
 """
 SenseGate - QEMU -> Cloud bridge  (+ collector -> gateway LoRa simulation)
 
+The firmware runs forever, emitting one packet per SIM_TX_INTERVAL_MS.
+Build with -DSIM_TX_INTERVAL_MS=2000 for a 2-second cadence during testing.
+Production cadence is 300000 ms (5 minutes).
+
 Modes:
   1. Collector only (default):
-       Runs node_collector QEMU, captures encrypted packets, POSTs to /ingest.
+       Runs node_collector QEMU, streams encrypted packets, POSTs to /ingest.
+       force=true bypasses dedup so every packet is stored in the DB.
 
   2. Full pipeline  (--gateway):
        Runs both QEMU nodes in parallel.
@@ -14,12 +19,11 @@ Modes:
 
 Usage:
     python sim_bridge.py [--cloud http://localhost:8080] [--device-id 1]
-                         [--loop] [--interval 5]
                          [--gateway]
 
 Prerequisites:
     - Docker stack running:  cd cloud && docker-compose up -d
-    - Both firmware ELFs built
+    - Firmware ELF built with desired SIM_TX_INTERVAL_MS
     - QEMU at C:/Program Files/qemu/qemu-system-arm.exe
 """
 
@@ -59,6 +63,7 @@ def qemu_cmd(elf_path):
         "-kernel",   elf_path,
     ]
 
+
 # -- Regex patterns -----------------------------------------------------------
 
 RE_SEQ        = re.compile(r"TX #(\d+)")
@@ -88,6 +93,7 @@ def post_ingest(base_url, hex_str, device_id, seq):
         "hex":       hex_str.upper(),
         "device_id": device_id,
         "sequence":  seq,
+        "force":     True,
     })
 
 def post_sms(base_url, hex_str):
@@ -148,9 +154,9 @@ def run_gateway(gateway_proc, lora_queue, base_url, stop_event):
 
 # -- Collector QEMU runner ----------------------------------------------------
 
-def run_collector(base_url, device_id, seq_offset, lora_queue=None):
+def run_collector(base_url, device_id, lora_queue=None, interval=2.0):
     """
-    Spawns collector QEMU. Forwards encrypted packets to /ingest.
+    Spawns collector QEMU. Forwards encrypted packets to /ingest with force=true.
     If lora_queue is provided, also enqueues LoRa TX hex for the gateway.
     Returns number of packets forwarded.
     """
@@ -189,9 +195,8 @@ def run_collector(base_url, device_id, seq_offset, lora_queue=None):
                 if m:
                     hex_str         = m.group(1).upper()
                     expect_hex_next = False
-                    effective_seq   = current_seq + seq_offset
 
-                    resp       = post_ingest(base_url, hex_str, device_id, effective_seq)
+                    resp         = post_ingest(base_url, hex_str, device_id, current_seq)
                     packets_sent += 1
 
                     status     = resp.get("status", "?")
@@ -210,8 +215,9 @@ def run_collector(base_url, device_id, seq_offset, lora_queue=None):
                         alert_tag  = ("  ALERT:" + ",".join(a["type"] for a in alerts)) if alerts else ""
                         tag = f"{state_name:<20} pallet={pallet}  wrap={wrap}s  {db_tag}{alert_tag}"
 
-                    print(f"[bridge] --> seq={effective_seq:3d}  cloud={status}  {tag}")
+                    print(f"[bridge] --> seq={current_seq:3d}  cloud={status}  {tag}")
                     sys.stdout.flush()
+                    time.sleep(interval)
                 else:
                     expect_hex_next = False
                 continue
@@ -223,7 +229,7 @@ def run_collector(base_url, device_id, seq_offset, lora_queue=None):
                     lora_queue.put(m.group(1).upper())
 
     except KeyboardInterrupt:
-        raise
+        pass
     finally:
         proc.terminate()
         proc.wait()
@@ -237,15 +243,13 @@ def main():
     parser = argparse.ArgumentParser(description="SenseGate QEMU -> Cloud bridge")
     parser.add_argument("--cloud",     default="http://localhost:8080", help="Flask sim base URL")
     parser.add_argument("--device-id", type=int, default=1,            help="Modbus device ID")
-    parser.add_argument("--loop",      action="store_true",            help="Restart QEMU continuously")
-    parser.add_argument("--interval",  type=float, default=5.0,        help="Seconds between restarts (loop mode)")
     parser.add_argument("--gateway",   action="store_true",            help="Also run gateway QEMU (full pipeline)")
+    parser.add_argument("--interval",  type=float, default=2.0,        help="Seconds between packets (real time)")
     args = parser.parse_args()
 
-    # Validate ELF paths
     if not os.path.exists(COLLECTOR_ELF):
         print(f"[bridge] ERROR: collector ELF not found: {COLLECTOR_ELF}")
-        print("[bridge] Build: cd node_collector && west build -b qemu_cortex_m3")
+        print("[bridge] Build: cd node_collector && west build -b qemu_cortex_m3 -- -DSIM_TX_INTERVAL_MS=2000")
         sys.exit(1)
 
     if args.gateway and not os.path.exists(GATEWAY_ELF):
@@ -257,85 +261,62 @@ def main():
         print(f"[bridge] ERROR: QEMU not found: {QEMU_EXE}")
         sys.exit(1)
 
-    def print_header(run_num, seq_offset):
-        print("=" * 60)
-        if args.loop:
-            print(f"  SenseGate - QEMU -> Cloud bridge  [run #{run_num}]")
-        else:
-            print("  SenseGate - QEMU -> Cloud bridge")
-        print("=" * 60)
-        print(f"  Collector ELF : {COLLECTOR_ELF}")
-        if args.gateway:
-            print(f"  Gateway ELF   : {GATEWAY_ELF}")
-        print(f"  Cloud         : {args.cloud}/ingest")
-        print(f"  DevID         : {args.device_id}")
-        if args.loop:
-            print(f"  SeqOffset     : +{seq_offset}")
-        if args.gateway:
-            print(f"  Pipeline      : collector -> LoRa -> gateway -> NB-IoT -> cloud")
-        print("=" * 60)
-        print()
+    print("=" * 60)
+    print("  SenseGate - QEMU -> Cloud bridge")
+    print("=" * 60)
+    print(f"  Collector ELF : {COLLECTOR_ELF}")
+    if args.gateway:
+        print(f"  Gateway ELF   : {GATEWAY_ELF}")
+    print(f"  Cloud         : {args.cloud}/ingest  (force=true)")
+    print(f"  DevID         : {args.device_id}")
+    if args.gateway:
+        print(f"  Pipeline      : collector -> LoRa -> gateway -> NB-IoT -> cloud")
+    print(f"  Interval      : {args.interval}s between packets (real time)")
+    print("  Firmware loops forever — Ctrl+C to stop")
+    print("=" * 60)
+    print()
 
-    total_packets = 0
-    run_num       = 1
-    seq_offset    = 0
+    lora_queue = None
+    gw_thread  = None
+    gw_proc    = None
+    stop_event = threading.Event()
 
+    if args.gateway:
+        lora_queue = queue.Queue()
+        gw_proc = subprocess.Popen(
+            qemu_cmd(GATEWAY_ELF),
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+            bufsize=1,
+        )
+        gw_thread = threading.Thread(
+            target=run_gateway,
+            args=(gw_proc, lora_queue, args.cloud, stop_event),
+            daemon=True,
+        )
+        gw_thread.start()
+
+    sent = 0
     try:
-        while True:
-            print_header(run_num, seq_offset)
-
-            lora_queue  = None
-            gw_thread   = None
-            gw_proc     = None
-            stop_event  = threading.Event()
-
-            if args.gateway:
-                lora_queue = queue.Queue()
-                gw_proc = subprocess.Popen(
-                    qemu_cmd(GATEWAY_ELF),
-                    stdin=subprocess.PIPE,
-                    stdout=subprocess.PIPE,
-                    stderr=subprocess.STDOUT,
-                    text=True,
-                    bufsize=1,
-                )
-                gw_thread = threading.Thread(
-                    target=run_gateway,
-                    args=(gw_proc, lora_queue, args.cloud, stop_event),
-                    daemon=True,
-                )
-                gw_thread.start()
-
-            sent = run_collector(args.cloud, args.device_id, seq_offset, lora_queue)
-            total_packets += sent
-
-            # Signal gateway thread to stop and wait
-            if args.gateway:
-                stop_event.set()
-                if gw_proc:
-                    gw_proc.terminate()
-                    gw_proc.wait()
-                if gw_thread:
-                    gw_thread.join(timeout=5)
-
-            print()
-            print(f"[bridge] Run #{run_num} complete. Packets this run: {sent}  Total: {total_packets}")
-
-            if not args.loop:
-                break
-
-            seq_offset += sent
-            run_num    += 1
-
-            print(f"[bridge] Restarting in {args.interval:.0f}s ... (Ctrl+C to stop)")
-            time.sleep(args.interval)
-            print()
-
+        sent = run_collector(args.cloud, args.device_id, lora_queue, args.interval)
     except KeyboardInterrupt:
         print("\n[bridge] Stopped by user.")
 
+    if args.gateway:
+        stop_event.set()
+        if gw_proc:
+            gw_proc.terminate()
+            try:
+                gw_proc.wait(timeout=3)
+            except Exception:
+                gw_proc.kill()
+        if gw_thread:
+            gw_thread.join(timeout=3)
+
     print()
-    print(f"[bridge] Done. Total packets forwarded to cloud: {total_packets}")
+    print(f"[bridge] Done. Total packets forwarded to cloud: {sent}")
 
 
 if __name__ == "__main__":

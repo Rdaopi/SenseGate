@@ -42,8 +42,9 @@
 #define MB_REG_TS_LOW       13   /* 40014 */
 #define MB_NUM_REGS         14
 
-void modbus_sim_init(void);
-int  modbus_sim_read_registers(uint16_t *regs, uint8_t count);
-void modbus_sim_tick(uint16_t seq);
+void     modbus_sim_init(void);
+int      modbus_sim_read_registers(uint16_t *regs, uint8_t count);
+void     modbus_sim_tick(uint16_t seq);
+uint32_t modbus_sim_base_ts(void);
 
 #endif /* MODBUS_SIM_H */

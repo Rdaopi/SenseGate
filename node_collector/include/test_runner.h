@@ -42,7 +42,13 @@ typedef void (*tx_callback_t)(const hal_sensor_data_t *data,
                                uint16_t seq,
                                const char *scenario_name);
 
+/* SIM_TX_INTERVAL_MS: ms between packets (injected by CMake, default 5 min) */
+#ifndef SIM_TX_INTERVAL_MS
+#define SIM_TX_INTERVAL_MS 300000U
+#endif
+
 int  test_runner_load(test_config_t *cfg);
+/* Runs scenarios once then loops forever, sleeping SIM_TX_INTERVAL_MS between packets */
 void test_runner_run(const test_config_t *cfg, tx_callback_t on_tx);
 
 uint32_t tr_rand_u32(uint32_t min, uint32_t max);

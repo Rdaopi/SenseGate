@@ -103,6 +103,8 @@ def ingest():
     hex_str   = body.get("hex", "").strip().upper()
     device_id = body.get("device_id")
     sequence  = body.get("sequence")
+    # force=true skips dedup so simulation re-runs always store data
+    force     = str(body.get("force", request.args.get("force", "0"))).lower() in ("1", "true", "yes")
 
     if not hex_str or device_id is None or sequence is None:
         return jsonify({"status": "error", "message": "hex, device_id, sequence required"}), 400
@@ -126,7 +128,7 @@ def ingest():
 
     try:
         conn = _get_db()
-        if not _is_duplicate(conn, reading["device_id"], reading["sequence"]):
+        if force or not _is_duplicate(conn, reading["device_id"], reading["sequence"]):
             _insert_reading(conn, reading)
             conn.commit()
             stored = True

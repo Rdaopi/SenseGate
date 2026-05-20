@@ -1,4 +1,5 @@
 #include "test_runner.h"
+#include "modbus_sim.h"
 #include <zephyr/kernel.h>
 #include <zephyr/sys/printk.h>
 #include <string.h>
@@ -98,60 +99,48 @@ int test_runner_load(test_config_t *cfg)
 /* ── Runner ─────────────────────────────────────────────── */
 void test_runner_run(const test_config_t *cfg, tx_callback_t on_tx)
 {
-    printk("\n[TEST RUNNER] Starting — %d scenarios\n\n", cfg->count);
+    printk("\n[TEST RUNNER] Starting — %d scenarios, interval=%u ms\n\n",
+           cfg->count, (unsigned)SIM_TX_INTERVAL_MS);
 
     uint16_t global_seq = 0;
-    uint32_t base_ts    = 1774138000U;
+    uint32_t base_ts    = modbus_sim_base_ts();
+    uint32_t cycle      = 0;
 
-    for (int s = 0; s < cfg->count; s++) {
-        const test_scenario_t *sc = &cfg->scenarios[s];
+    while (1) {
+        for (int s = 0; s < cfg->count; s++) {
+            const test_scenario_t *sc = &cfg->scenarios[s];
 
-        printk("==============================\n");
-        printk("Scenario %d/%d: %s\n", s+1, cfg->count, sc->name);
-        printk("  State: %u  Loops: %u  Interval: %ums\n",
-               sc->state, sc->loops, sc->interval_ms);
-        printk("  Wrap: %u-%us  Rotations: %u-%u\n",
-               sc->wrap_time.min, sc->wrap_time.max,
-               sc->rotations.min, sc->rotations.max);
-        printk("==============================\n\n");
+            for (uint32_t loop = 0; loop < sc->loops; loop++) {
 
-        for (uint32_t loop = 0; loop < sc->loops; loop++) {
+                hal_sensor_data_t data;
 
-            hal_sensor_data_t data;
+                data.state             = sc->state;
+                data.pallet_id         = tr_rand_u32(sc->pallet_id.min,
+                                                      sc->pallet_id.max);
+                data.wrap_time         = tr_rand_u16(sc->wrap_time.min,
+                                                      sc->wrap_time.max);
+                data.wrap_transit_time = tr_rand_u16(sc->wrap_transit.min,
+                                                      sc->wrap_transit.max);
+                data.pallet_rotations  = tr_rand_u16(sc->rotations.min,
+                                                      sc->rotations.max);
+                data.program_number    = sc->program_number;
+                data.pallet_perimeter  = sc->perimeter;
+                data.running_seconds   = tr_rand_u32(sc->running_secs.min,
+                                                      sc->running_secs.max);
+                data.alarm_seconds     = tr_rand_u32(sc->alarm_secs.min,
+                                                      sc->alarm_secs.max);
+                /* advance machine clock by SIM_TX_INTERVAL_MS per packet */
+                data.machine_timestamp = base_ts
+                    + (uint32_t)global_seq * (SIM_TX_INTERVAL_MS / 1000U);
 
-            data.state              = sc->state;
-            data.pallet_id          = tr_rand_u32(sc->pallet_id.min,
-                                                   sc->pallet_id.max);
-            data.wrap_time          = tr_rand_u16(sc->wrap_time.min,
-                                                   sc->wrap_time.max);
-            data.wrap_transit_time  = tr_rand_u16(sc->wrap_transit.min,
-                                                   sc->wrap_transit.max);
-            data.pallet_rotations   = tr_rand_u16(sc->rotations.min,
-                                                   sc->rotations.max);
-            data.program_number     = sc->program_number;
-            data.pallet_perimeter   = sc->perimeter;
-            data.running_seconds    = tr_rand_u32(sc->running_secs.min,
-                                                   sc->running_secs.max);
-            data.alarm_seconds      = tr_rand_u32(sc->alarm_secs.min,
-                                                   sc->alarm_secs.max);
-            data.machine_timestamp  = base_ts + (uint32_t)global_seq * 60;
+                printk("[%s] TX #%u (cycle=%u) state=%u pallet=%lu\n",
+                       sc->name, global_seq, cycle,
+                       data.state, (unsigned long)data.pallet_id);
 
-            printk("[%s] TX #%u (%u/%u) state=%u pallet=%lu\n",
-                   sc->name, global_seq,
-                   loop+1, sc->loops,
-                   data.state,
-                   (unsigned long)data.pallet_id);
-
-            on_tx(&data, global_seq, sc->name);
-            global_seq++;
-
-            if (sc->interval_ms > 0) {
-                k_msleep(sc->interval_ms);
+                on_tx(&data, global_seq, sc->name);
+                global_seq++;
             }
         }
-
-        printk("[TEST RUNNER] '%s' complete\n\n", sc->name);
+        cycle++;
     }
-
-    printk("[TEST RUNNER] Done. Total TX: %u\n", global_seq);
 }
