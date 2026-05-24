@@ -73,7 +73,7 @@ static void on_tx(const hal_sensor_data_t *data,
 
     /* 4. Store */
     int store_result = hal_flash_write(tx_packet, SF_SLOT_SIZE);
-    if (store_result == HAL_FULL) {
+    if (store_result == SG_HAL_FULL) {
         printk("  BUFFER: FULL -- packet dropped\n");
     } else {
         printk("  BUFFER: stored (%d pending)\n", hal_flash_pending());
@@ -89,7 +89,7 @@ int main(void)
     printk("\nSenseGate -- Data Collector Node\n");
     printk("==================================\n\n");
 
-    if (hal_init() != HAL_OK) {
+    if (hal_init() != SG_HAL_OK) {
         printk("FATAL: hal_init failed\n");
         return -1;
     }

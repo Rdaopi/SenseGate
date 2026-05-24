@@ -19,10 +19,10 @@ typedef struct {
     uint32_t machine_timestamp;
 } hal_sensor_data_t;
 
-#define HAL_OK      0
-#define HAL_ERROR  -1
-#define HAL_FULL   -2
-#define HAL_EMPTY  -3
+#define SG_HAL_OK      0
+#define SG_HAL_ERROR  -1
+#define SG_HAL_FULL   -2
+#define SG_HAL_EMPTY  -3
 
 int  hal_init(void);
 int  hal_sensor_read(hal_sensor_data_t *data, uint16_t seq);

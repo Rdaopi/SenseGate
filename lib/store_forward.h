@@ -8,10 +8,10 @@
  * Simula il W25Q32 NOR flash con un array statico in RAM.
  * In produzione: stesse funzioni, driver SPI flash sotto.
  *
- * Capacità: 200 slot da 38 byte = 7600 byte
- * (il flash reale da 1MB ne contiene ~26000)
+ * 20 slot = 1000 bytes — adatto a NUCLEO-L073RZ (20KB RAM).
+ * Aumentare a 200 quando si usa il flash NOR esterno W25Q32.
  */
-#define SF_MAX_SLOTS   200
+#define SF_MAX_SLOTS   20
 #define SF_SLOT_SIZE   TX_PACKET_SIZE   /* 38 byte */
 
 /* Stati possibili del buffer */

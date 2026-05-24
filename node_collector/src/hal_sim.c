@@ -19,7 +19,7 @@ int hal_init(void)
 
     if (aes_ctr_init(SIM_KEY, AES_KEY_SIZE) != 0) {
         printk("[HAL COLLECTOR SIM] ERROR: AES init failed\n");
-        return HAL_ERROR;
+        return SG_HAL_ERROR;
     }
 
     rolling_buffer_init();
@@ -27,7 +27,7 @@ int hal_init(void)
     modbus_sim_init();
 
     printk("[HAL COLLECTOR SIM] Ready\n");
-    return HAL_OK;
+    return SG_HAL_OK;
 }
 
 int hal_sensor_read(hal_sensor_data_t *data, uint16_t seq)
@@ -38,7 +38,7 @@ int hal_sensor_read(hal_sensor_data_t *data, uint16_t seq)
     uint16_t regs[MB_NUM_REGS];
     if (modbus_sim_read_registers(regs, MB_NUM_REGS) != 0) {
         printk("[HAL COLLECTOR SIM] ERROR: Modbus read failed\n");
-        return HAL_ERROR;
+        return SG_HAL_ERROR;
     }
 
     data->state = (uint8_t)regs[MB_REG_STATE];
@@ -65,19 +65,19 @@ int hal_sensor_read(hal_sensor_data_t *data, uint16_t seq)
         printk("[HAL COLLECTOR SIM] WARNING: machine OFFLINE\n");
     }
 
-    return HAL_OK;
+    return SG_HAL_OK;
 }
 
 int hal_flash_write(const uint8_t *packet, size_t len)
 {
-    if (len != SF_SLOT_SIZE) return HAL_ERROR;
-    return (sf_write(packet) == SF_OK) ? HAL_OK : HAL_FULL;
+    if (len != SF_SLOT_SIZE) return SG_HAL_ERROR;
+    return (sf_write(packet) == SF_OK) ? SG_HAL_OK : SG_HAL_FULL;
 }
 
 int hal_flash_read(uint8_t *packet, size_t len)
 {
-    if (len != SF_SLOT_SIZE) return HAL_ERROR;
-    return (sf_read(packet) == SF_OK) ? HAL_OK : HAL_EMPTY;
+    if (len != SF_SLOT_SIZE) return SG_HAL_ERROR;
+    return (sf_read(packet) == SF_OK) ? SG_HAL_OK : SG_HAL_EMPTY;
 }
 
 int hal_flash_pending(void)
@@ -96,7 +96,7 @@ int hal_radio_tx(const uint8_t *packet, size_t len)
         printk("%02X", packet[i]);
     }
     printk("\n");
-    return HAL_OK;
+    return SG_HAL_OK;
 }
 
 int hal_crypto_get_key(uint8_t *key_out, size_t key_len)
@@ -105,9 +105,9 @@ int hal_crypto_get_key(uint8_t *key_out, size_t key_len)
      * Returns hardcoded key.
      * Later: atcab_read_zone() on ATECC608B via I2C
      */
-    if (key_len != AES_KEY_SIZE) return HAL_ERROR;
+    if (key_len != AES_KEY_SIZE) return SG_HAL_ERROR;
     memcpy(key_out, SIM_KEY, AES_KEY_SIZE);
-    return HAL_OK;
+    return SG_HAL_OK;
 }
 
 void hal_crypto_make_nonce(uint8_t *nonce_out,
