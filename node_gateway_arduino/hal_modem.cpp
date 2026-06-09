@@ -5,7 +5,9 @@
  */
 
 #include "hal.h"
+#include "store_forward.h"
 #include <Arduino.h>
+#include <bluefruit.h>
 
 /* Uncomment when real modem is wired to Serial1 */
 // #define CONFIG_NBIOT_REAL
@@ -64,12 +66,29 @@ int hal_modem_send_sms(const uint8_t *payload, size_t len)
 
 #else /* DEMO MODE — no serial output */
 
+/* forward declaration — defined in .ino */
+extern BLEUart bleuart;
+
 void hal_modem_init(void) {}
 
 int hal_modem_send_sms(const uint8_t *payload, size_t len)
 {
-    (void)payload;
-    (void)len;
+    /* Build full line: "[GATEWAY] NB-IoT TX simulation: <hex>\n" */
+    char line[8 + SF_SLOT_SIZE * 2 + 64];
+    int  pos = 0;
+    pos += snprintf(line + pos, sizeof(line) - pos, "[GATEWAY] NB-IoT TX simulation: ");
+    for (size_t i = 0; i < len && pos + 2 < (int)sizeof(line); i++) {
+        pos += snprintf(line + pos, sizeof(line) - pos, "%02X", payload[i]);
+    }
+    line[pos++] = '\n';
+    line[pos]   = '\0';
+
+    /* Send over BLE UART */
+    if (Bluefruit.connected())
+        bleuart.write((const uint8_t *)line, pos);
+
+    /* Mirror on USB serial */
+    Serial.print(line);
     return SG_HAL_OK;
 }
 

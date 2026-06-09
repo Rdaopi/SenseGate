@@ -1,53 +1,54 @@
 """
-SenseGate - Demo bridge: NUCLEO collector -> RAK4631 gateway (real HW) -> cloud
+SenseGate - Demo bridge: NUCLEO collector -> RAK4631 gateway (BLE) -> cloud
 
 Full pipeline:
 
     PC (modbus_sim)
       -> NUCLEO (AES, pack, LoRa TX via Ebyte)
-        -> RAK4631 (LoRa RX, store-forward, NB-IoT sim on USB-C)
-          -> hw_bridge_demo.py reads RAK USB-C serial
+        -> RAK4631 (LoRa RX, store-forward, NB-IoT sim over BLE)
+          -> hw_bridge_demo.py receives BLE notifications
             -> POST /sms -> Docker (Twilio sim -> AWS IoT -> Grafana)
 
 Usage:
-    python hw_bridge_demo.py --collector COM3 --gateway COM5
-    python hw_bridge_demo.py --collector COM3 --gateway COM5 --url http://localhost:8080
+    python hw_bridge_demo.py --collector COM3
+    python hw_bridge_demo.py --collector COM3 --url http://localhost:8080
 
 Prerequisites:
     - Docker stack running:   cd cloud && docker compose up -d
-    - NUCLEO flashed with HAL_USE_LORA (Ebyte connected)
-    - RAK4631 flashed with HAL_USE_LORA + Serial output enabled
-    - pyserial installed:     pip install pyserial
-
-Fallback (no LoRa HW):
-    - NUCLEO with HAL_USE_SIM, RAK4631 with HAL_USE_SIM
-    - bridge reads NUCLEO serial for LoRa TX lines and RAK serial for NB-IoT TX lines
+    - NUCLEO flashed and connected via USB on --collector port
+    - RAK4631 flashed with BLE firmware, powered on and advertising "SenseGate-GW"
+    - pip install bleak pyserial
 """
 
 import argparse
+import asyncio
 import json
+import re
 import sys
 import threading
 import time
 import urllib.parse
 import urllib.request
 import urllib.error
-import re
 
 import serial
+from bleak import BleakClient, BleakScanner
 
-# --- regex patterns ---
-# NUCLEO collector outputs this when it transmits a LoRa packet
+# Nordic UART Service UUIDs (standard)
+NUS_SERVICE_UUID = "6e400001-b5a3-f393-e0a9-e50e24dcca9e"
+NUS_TX_CHAR_UUID = "6e400003-b5a3-f393-e0a9-e50e24dcca9e"  # RAK notifies on this
+NUS_RX_CHAR_UUID = "6e400002-b5a3-f393-e0a9-e50e24dcca9e"  # PC writes on this
+
+GATEWAY_NAME = "SenseGate-GW"
+
 RE_COLLECTOR_TX = re.compile(
     r"\[HAL (?:COLLECTOR SIM|HW)\] LoRa TX \d+ bytes: ([0-9A-Fa-f]+)"
 )
-
-# RAK4631 gateway outputs this when it forwards via NB-IoT (demo mode)
 RE_GATEWAY_NBIOT = re.compile(
     r"\[GATEWAY\] NB-IoT TX simulation: ([0-9A-Fa-f]+)"
 )
 
-FULL_HEX_LEN = 100   # 50 bytes * 2 hex chars
+FULL_HEX_LEN = 100  # 50 bytes * 2 hex chars
 
 
 def post_sms(base_url, hex_str):
@@ -66,120 +67,153 @@ def post_sms(base_url, hex_str):
         return {"error": str(e)}
 
 
-def read_serial(port_name, baud, label, line_cb, stop_event):
-    """Thread: reads lines from a serial port and calls line_cb(line) for each."""
+def handle_gateway_line(line, base_url, counter):
+    m = RE_GATEWAY_NBIOT.search(line)
+    if not m:
+        return
+    hex_str = m.group(1).upper()
+    resp = post_sms(base_url, hex_str)
+    if resp.get("error"):
+        time.sleep(1)
+        resp = post_sms(base_url, hex_str)
+    status  = resp.get("status", resp.get("error", "?"))
+    results = resp.get("results", [])
+    stored  = any(r.get("stored") for r in results)
+    db_tag  = "stored" if stored else "dup"
+    counter[0] += 1
+    print(f"[bridge] --> NB-IoT POST #{counter[0]}  cloud={status}  {db_tag}")
+    sys.stdout.flush()
+
+
+async def ble_gateway_task(base_url, stop_event, counter):
+    """Scan for SenseGate-GW, connect, receive NUS notifications."""
+    while not stop_event.is_set():
+        print(f"[BLE] Scanning for '{GATEWAY_NAME}'...")
+        try:
+            device = await BleakScanner.find_device_by_name(GATEWAY_NAME, timeout=10.0)
+        except Exception as e:
+            print(f"[BLE] Scan error: {e} — retrying in 5s")
+            await asyncio.sleep(5)
+            continue
+
+        if device is None:
+            print(f"[BLE] '{GATEWAY_NAME}' not found — retrying in 5s")
+            await asyncio.sleep(5)
+            continue
+
+        print(f"[BLE] Found {device.name} ({device.address}) — connecting...")
+        buf = ""
+
+        def on_notify(sender, data):
+            nonlocal buf
+            buf += data.decode("utf-8", errors="replace")
+            while "\n" in buf:
+                line, buf = buf.split("\n", 1)
+                line = line.strip()
+                if line:
+                    print(f"[GATEWAY/BLE] {line}")
+                    sys.stdout.flush()
+                    handle_gateway_line(line, base_url, counter)
+
+        try:
+            async with BleakClient(device) as client:
+                print(f"[BLE] Connected to {device.name}")
+                services = client.services
+                print("[BLE] Services found:")
+                for svc in services:
+                    print(f"  SVC {svc.uuid}")
+                    for ch in svc.characteristics:
+                        print(f"    CHR {ch.uuid}  props={ch.properties}")
+                await client.start_notify(NUS_TX_CHAR_UUID, on_notify)
+                print("[BLE] Subscribed to NUS TX — waiting for data...")
+                while not stop_event.is_set() and client.is_connected:
+                    await asyncio.sleep(0.5)
+                await client.stop_notify(NUS_TX_CHAR_UUID)
+        except Exception as e:
+            print(f"[BLE] Connection lost: {e} — reconnecting in 3s")
+            await asyncio.sleep(3)
+
+
+def collector_thread(port, baud, stop_event):
+    """Read NUCLEO serial and print LoRa TX lines for monitoring."""
     while not stop_event.is_set():
         try:
-            ser = serial.Serial(port_name, baud, timeout=1)
-            print(f"[bridge] {label} opened on {port_name}")
+            ser = serial.Serial(port, baud, timeout=1)
+            print(f"[COLLECTOR] Opened {port}")
             while not stop_event.is_set():
                 try:
                     raw = ser.readline()
                 except serial.SerialException as e:
-                    print(f"[bridge] {label} serial error: {e}")
+                    print(f"[COLLECTOR] Serial error: {e}")
                     break
                 if not raw:
                     continue
-                try:
-                    line = raw.decode("utf-8", errors="replace").rstrip("\r\n")
-                except Exception:
-                    continue
+                line = raw.decode("utf-8", errors="replace").rstrip("\r\n")
                 if line:
-                    line_cb(line)
+                    print(f"[COLLECTOR] {line}")
+                    sys.stdout.flush()
             ser.close()
         except serial.SerialException as e:
-            print(f"[bridge] {label} cannot open {port_name}: {e} — retrying in 3s")
+            print(f"[COLLECTOR] Cannot open {port}: {e} — retrying in 3s")
             time.sleep(3)
 
 
-def run(collector_port, gateway_port, baud, base_url):
+def run(collector_port, baud, base_url):
     stop_event = threading.Event()
-    packets_forwarded = 0
-    lock = threading.Lock()
-
-    def on_collector_line(line):
-        print(f"[COLLECTOR] {line}")
-        sys.stdout.flush()
-        m = RE_COLLECTOR_TX.search(line)
-        if not m:
-            return
-        hex_str = m.group(1).upper()
-        if len(hex_str) != FULL_HEX_LEN:
-            print(f"[bridge] WARNING: collector hex wrong length ({len(hex_str)} chars), skipping")
-            return
-        print(f"[bridge] --> LoRa packet from NUCLEO ({len(hex_str)//2} bytes) — waiting for RAK to forward")
-        sys.stdout.flush()
-
-    def on_gateway_line(line):
-        nonlocal packets_forwarded
-        print(f"[GATEWAY]   {line}")
-        sys.stdout.flush()
-        m = RE_GATEWAY_NBIOT.search(line)
-        if not m:
-            return
-        hex_str = m.group(1).upper()
-        resp = post_sms(base_url, hex_str)
-        # one retry on failure
-        if resp.get("error"):
-            time.sleep(1)
-            resp = post_sms(base_url, hex_str)
-        status  = resp.get("status", resp.get("error", "?"))
-        results = resp.get("results", [])
-        stored  = any(r.get("stored") for r in results)
-        db_tag  = "stored" if stored else "dup"
-        with lock:
-            packets_forwarded += 1
-            count = packets_forwarded
-        print(f"[bridge] --> NB-IoT POST #{count}  cloud={status}  {db_tag}")
-        sys.stdout.flush()
-
-    collector_thread = threading.Thread(
-        target=read_serial,
-        args=(collector_port, baud, "COLLECTOR", on_collector_line, stop_event),
-        daemon=True,
-    )
-    gateway_thread = threading.Thread(
-        target=read_serial,
-        args=(gateway_port, baud, "GATEWAY  ", on_gateway_line, stop_event),
-        daemon=True,
-    )
+    counter = [0]
 
     print("=" * 60)
-    print("  SenseGate - Full Demo Bridge")
+    print("  SenseGate - Full Demo Bridge (BLE)")
     print("=" * 60)
     print(f"  Collector : NUCLEO on {collector_port}")
-    print(f"  Gateway   : RAK4631 on {gateway_port}")
+    print(f"  Gateway   : RAK4631 via BLE ({GATEWAY_NAME})")
     print(f"  Cloud     : {base_url}/sms")
-    print(f"  Pipeline  : NUCLEO --LoRa--> RAK4631 --NB-IoT sim--> cloud")
+    print(f"  Pipeline  : NUCLEO --LoRa--> RAK4631 --BLE--> PC --HTTP--> cloud")
     print("  Ctrl+C to stop")
     print("=" * 60)
     print()
 
-    collector_thread.start()
-    gateway_thread.start()
+    # Start NUCLEO serial reader thread
+    t = threading.Thread(
+        target=collector_thread,
+        args=(collector_port, baud, stop_event),
+        daemon=True,
+    )
+    t.start()
+
+    # Run BLE event loop in main thread
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
+
+    async def main_loop():
+        ble_task = asyncio.create_task(
+            ble_gateway_task(base_url, stop_event, counter)
+        )
+        try:
+            await ble_task
+        except asyncio.CancelledError:
+            pass
 
     try:
-        while True:
-            time.sleep(1)
+        loop.run_until_complete(main_loop())
     except KeyboardInterrupt:
         print("\n[bridge] Stopped by user.")
     finally:
         stop_event.set()
+        loop.close()
 
-    collector_thread.join(timeout=3)
-    gateway_thread.join(timeout=3)
-    print(f"[bridge] Done. Total packets forwarded to cloud: {packets_forwarded}")
+    t.join(timeout=3)
+    print(f"\n[bridge] Done. Total packets forwarded to cloud: {counter[0]}")
 
 
 def main():
-    parser = argparse.ArgumentParser(description="SenseGate full demo bridge")
+    parser = argparse.ArgumentParser(description="SenseGate full demo bridge (BLE gateway)")
     parser.add_argument("--collector", default="COM3",                  help="NUCLEO serial port (default: COM3)")
-    parser.add_argument("--gateway",   default="COM5",                  help="RAK4631 serial port (default: COM5)")
     parser.add_argument("--baud",      type=int, default=115200,        help="Baud rate (default: 115200)")
     parser.add_argument("--url",       default="http://localhost:8080", help="Cloud base URL")
     args = parser.parse_args()
 
-    run(args.collector, args.gateway, args.baud, args.url)
+    run(args.collector, args.baud, args.url)
 
 
 if __name__ == "__main__":
