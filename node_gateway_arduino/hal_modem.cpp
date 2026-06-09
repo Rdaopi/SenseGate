@@ -1,12 +1,7 @@
 /*
- * hal_modem.cpp — NB-IoT modem HAL
- *
- * DEMO MODE (current): prints hex payload on Serial.
- * sim_bridge.py captures the "[GATEWAY] NB-IoT TX" line and
- * forwards it to the Docker stack (Twilio sim → AWS IoT → Grafana).
- *
- * REAL HW (future): uncomment CONFIG_NBIOT_REAL and wire a
- * Quectel BC660K-GL or similar to Serial1 (UART0 on RAK19007).
+ * hal_modem.cpp — NB-IoT modem HAL (demo mode)
+ * sim_bridge.py is not used in this no-serial build.
+ * Real AT command path: uncomment CONFIG_NBIOT_REAL and wire modem to Serial1.
  */
 
 #include "hal.h"
@@ -19,7 +14,7 @@
 
 #define MODEM_SERIAL  Serial1
 #define MODEM_BAUD    115200
-#define MODEM_TIMEOUT 30000   /* ms */
+#define MODEM_TIMEOUT 30000
 
 static bool modem_ready = false;
 
@@ -29,9 +24,7 @@ static bool modem_at(const char *cmd, const char *expect, uint32_t timeout_ms)
     uint32_t start = millis();
     String resp = "";
     while (millis() - start < timeout_ms) {
-        while (MODEM_SERIAL.available()) {
-            resp += (char)MODEM_SERIAL.read();
-        }
+        while (MODEM_SERIAL.available()) resp += (char)MODEM_SERIAL.read();
         if (resp.indexOf(expect) >= 0) return true;
         if (resp.indexOf("ERROR") >= 0) return false;
     }
@@ -42,58 +35,41 @@ void hal_modem_init(void)
 {
     MODEM_SERIAL.begin(MODEM_BAUD);
     delay(2000);
-    modem_ready  = modem_at("AT", "OK", 5000)
-                && modem_at("AT+CMGF=0", "OK", 3000); /* PDU mode */
-    Serial.println(modem_ready ? "[MODEM] Ready" : "[MODEM] Init failed");
+    modem_ready = modem_at("AT", "OK", 5000)
+               && modem_at("AT+CMGF=0", "OK", 3000);
 }
 
 int hal_modem_send_sms(const uint8_t *payload, size_t len)
 {
     if (!modem_ready) return SG_HAL_ERROR;
-
-    /* Build hex string */
     String hex = "";
     for (size_t i = 0; i < len; i++) {
         if (payload[i] < 0x10) hex += "0";
         hex += String(payload[i], HEX);
     }
-
-    /* AT+CMGS=<length in bytes> */
-    String cmd = "AT+CMGS=\"+39XXXXXXXXXX\""; /* TODO: set MSISDN */
+    String cmd = "AT+CMGS=\"+39XXXXXXXXXX\"";
     MODEM_SERIAL.println(cmd);
     delay(500);
     MODEM_SERIAL.print(hex);
-    MODEM_SERIAL.write(0x1A); /* CTRL+Z — triggers send */
-
+    MODEM_SERIAL.write(0x1A);
     uint32_t start = millis();
     String resp = "";
     while (millis() - start < MODEM_TIMEOUT) {
         while (MODEM_SERIAL.available()) resp += (char)MODEM_SERIAL.read();
-        if (resp.indexOf("OK") >= 0) {
-            Serial.println("[MODEM] SMS sent OK");
-            return SG_HAL_OK;
-        }
+        if (resp.indexOf("OK") >= 0) return SG_HAL_OK;
         if (resp.indexOf("ERROR") >= 0) break;
     }
-    Serial.println("[MODEM] SMS send failed");
     return SG_HAL_ERROR;
 }
 
-#else /* DEMO MODE — output captured by sim_bridge.py */
+#else /* DEMO MODE — no serial output */
 
-void hal_modem_init(void)
-{
-    Serial.println("[MODEM SIM] Demo mode — output via Serial");
-}
+void hal_modem_init(void) {}
 
 int hal_modem_send_sms(const uint8_t *payload, size_t len)
 {
-    Serial.print("[GATEWAY] NB-IoT TX simulation: ");
-    for (size_t i = 0; i < len; i++) {
-        if (payload[i] < 0x10) Serial.print("0");
-        Serial.print(payload[i], HEX);
-    }
-    Serial.println();
+    (void)payload;
+    (void)len;
     return SG_HAL_OK;
 }
 

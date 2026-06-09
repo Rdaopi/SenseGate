@@ -25,10 +25,7 @@ static const uint8_t SIM_PACKET[SF_SLOT_SIZE] = {
 
 int hal_init(void)
 {
-    Serial.println("[HAL GW SIM] Initializing gateway");
     sf_init();
-    Serial.print("[HAL GW SIM] Ready. Role: ");
-    Serial.println(sim_role == HAL_ROLE_MASTER ? "MASTER" : "SLAVE");
     return SG_HAL_OK;
 }
 
@@ -55,9 +52,6 @@ int hal_radio_rx(uint8_t *packet, size_t len)
     memcpy(packet, SIM_PACKET, SF_SLOT_SIZE);
     packet[0] ^= (uint8_t)sim_seq;
     sim_seq++;
-    Serial.print("[HAL GW SIM] LoRa RX simulated (seq ");
-    Serial.print(sim_seq);
-    Serial.println(")");
     return SG_HAL_OK;
 }
 
