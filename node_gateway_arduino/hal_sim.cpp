@@ -1,8 +1,14 @@
+/*
+ * hal_sim.cpp — simulation HAL
+ * Active when HAL_USE_SIM is defined (see hal_select.h)
+ */
+#include "hal_select.h"
+#ifdef HAL_USE_SIM
+
 #include "hal.h"
 #include "store_forward.h"
-#include "rolling_buffer.h"
+#include <Arduino.h>
 #include <string.h>
-#include <zephyr/sys/printk.h>
 
 static hal_role_t sim_role = HAL_ROLE_MASTER;
 static uint16_t   sim_seq  = 0;
@@ -19,11 +25,10 @@ static const uint8_t SIM_PACKET[SF_SLOT_SIZE] = {
 
 int hal_init(void)
 {
-    printk("[HAL GW SIM] Initializing gateway\n");
+    Serial.println("[HAL GW SIM] Initializing gateway");
     sf_init();
-    rolling_buffer_init();
-    printk("[HAL GW SIM] Ready. Role: %s\n",
-           sim_role == HAL_ROLE_MASTER ? "MASTER" : "SLAVE");
+    Serial.print("[HAL GW SIM] Ready. Role: ");
+    Serial.println(sim_role == HAL_ROLE_MASTER ? "MASTER" : "SLAVE");
     return SG_HAL_OK;
 }
 
@@ -50,26 +55,13 @@ int hal_radio_rx(uint8_t *packet, size_t len)
     memcpy(packet, SIM_PACKET, SF_SLOT_SIZE);
     packet[0] ^= (uint8_t)sim_seq;
     sim_seq++;
-    printk("[HAL GW SIM] LoRa RX simulated (seq %u)\n", sim_seq);
+    Serial.print("[HAL GW SIM] LoRa RX simulated (seq ");
+    Serial.print(sim_seq);
+    Serial.println(")");
     return SG_HAL_OK;
 }
 
-int hal_modem_send_sms(const uint8_t *payload, size_t len)
-{
-    printk("[GATEWAY] NB-IoT TX simulation: ");
-    for (size_t i = 0; i < len; i++) {
-        printk("%02X", payload[i]);
-    }
-    printk("\n");
-    return SG_HAL_OK;
-}
+hal_role_t hal_get_role(void) { return sim_role; }
+void hal_sim_set_role(hal_role_t role) { sim_role = role; }
 
-hal_role_t hal_get_role(void)
-{
-    return sim_role;
-}
-
-void hal_sim_set_role(hal_role_t role)
-{
-    sim_role = role;
-}
+#endif /* HAL_USE_SIM */

@@ -7,7 +7,7 @@ zephyr_include_directories(../lib)
 
 target_sources(app PRIVATE
     src/main.c
-    src/hal_lora.c
+    src/hal_sim.c
     src/role_election.c
     ../lib/aes_ctr.c
     ../lib/payload_packer.c

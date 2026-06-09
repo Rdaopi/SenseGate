@@ -1,11 +1,7 @@
-#ifndef HAL_H
-#define HAL_H
-
+#pragma once
 #include <stdint.h>
 #include <stddef.h>
-#include "rolling_buffer.h"
 
-/* SG_HAL_ prefix avoids collision with Zephyr nRF HAL symbols */
 #define SG_HAL_OK      0
 #define SG_HAL_ERROR  -1
 #define SG_HAL_FULL   -2
@@ -24,4 +20,3 @@ int        hal_radio_rx(uint8_t *packet, size_t len);
 int        hal_modem_send_sms(const uint8_t *payload, size_t len);
 hal_role_t hal_get_role(void);
 void       hal_sim_set_role(hal_role_t role);
-#endif

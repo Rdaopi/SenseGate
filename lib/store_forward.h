@@ -5,13 +5,11 @@
 #include "rolling_buffer.h"
 
 /*
- * Simula il W25Q32 NOR flash con un array statico in RAM.
- * In produzione: stesse funzioni, driver SPI flash sotto.
- *
- * 20 slot = 1000 bytes — adatto a NUCLEO-L073RZ (20KB RAM).
- * Aumentare a 200 quando si usa il flash NOR esterno W25Q32.
+ * Ring buffer backed by static RAM.
+ * RAK4631 (nRF52840) has 256 KB RAM — 200 slots * 50 bytes = 10 KB.
+ * NUCLEO-L073RZ (20 KB RAM) should use 20 slots max.
  */
-#define SF_MAX_SLOTS   20
+#define SF_MAX_SLOTS   200
 #define SF_SLOT_SIZE   TX_PACKET_SIZE   /* 38 byte */
 
 /* Stati possibili del buffer */

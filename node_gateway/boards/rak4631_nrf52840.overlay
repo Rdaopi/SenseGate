@@ -1,0 +1,28 @@
+/*
+ * RAK4631 with Adafruit UF2 bootloader v0.4.3.
+ * Application is flashed at 0x26000 (152KB reserved for bootloader).
+ * Override the default MCUBoot partition layout from nrf52840_partition.dtsi.
+ */
+
+/ {
+	chosen {
+		zephyr,console        = &cdc_acm_uart0;
+		zephyr,shell-uart     = &cdc_acm_uart0;
+		zephyr,code-partition = &slot0_partition;
+	};
+};
+
+&boot_partition {
+	reg = <0x00000000 DT_SIZE_K(152)>;
+};
+
+&slot0_partition {
+	label = "Application";
+	reg = <0x00026000 DT_SIZE_K(796)>;
+};
+
+&zephyr_udc0 {
+	cdc_acm_uart0: cdc_acm_uart0 {
+		compatible = "zephyr,cdc-acm-uart";
+	};
+};

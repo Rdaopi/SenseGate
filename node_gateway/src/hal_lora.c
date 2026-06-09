@@ -25,7 +25,7 @@
 #include <zephyr/sys/printk.h>
 #include <string.h>
 
-#if DT_HAS_ALIAS(lora0)
+#ifdef CONFIG_LORA
 static const struct device *lora_dev = DEVICE_DT_GET(LORA_NODE);
 #else
 static const struct device *lora_dev;
@@ -61,7 +61,7 @@ int hal_init(void)
     sf_init();
     rolling_buffer_init();
 
-#if DT_HAS_ALIAS(lora0)
+#ifdef CONFIG_LORA
     lora_ready = device_is_ready(lora_dev);
 #else
     lora_ready = false;
@@ -85,26 +85,26 @@ int hal_init(void)
                    LORA_FREQUENCY, 10);
         }
     } else {
-        printk("[HAL GW SIM] LoRa device not ready (QEMU?) — RX reads from stdin\n");
+        printk("[HAL GW HW] LoRa device not ready — stdin sim path active\n");
     }
 
     printk("[HAL GW HW] Ready. Role: %s\n",
            sim_role == HAL_ROLE_MASTER ? "MASTER" : "SLAVE");
-    return HAL_OK;
+    return SG_HAL_OK;
 }
 
 /* ── flash (store-and-forward) ──────────────────────────────────────────── */
 
 int hal_flash_write(const uint8_t *packet, size_t len)
 {
-    if (len != SF_SLOT_SIZE) return HAL_ERROR;
-    return (sf_write(packet) == SF_OK) ? HAL_OK : HAL_FULL;
+    if (len != SF_SLOT_SIZE) return SG_HAL_ERROR;
+    return (sf_write(packet) == SF_OK) ? SG_HAL_OK : SG_HAL_FULL;
 }
 
 int hal_flash_read(uint8_t *packet, size_t len)
 {
-    if (len != SF_SLOT_SIZE) return HAL_ERROR;
-    return (sf_read(packet) == SF_OK) ? HAL_OK : HAL_EMPTY;
+    if (len != SF_SLOT_SIZE) return SG_HAL_ERROR;
+    return (sf_read(packet) == SF_OK) ? SG_HAL_OK : SG_HAL_EMPTY;
 }
 
 int hal_flash_pending(void)
@@ -116,7 +116,7 @@ int hal_flash_pending(void)
 
 int hal_radio_rx(uint8_t *packet, size_t len)
 {
-    if (len < SF_SLOT_SIZE) return HAL_ERROR;
+    if (len < SF_SLOT_SIZE) return SG_HAL_ERROR;
 
     if (lora_ready) {
         int16_t rssi;
@@ -125,11 +125,11 @@ int hal_radio_rx(uint8_t *packet, size_t len)
                             K_MSEC(LORA_RX_TIMEOUT_MS), &rssi, &snr);
         if (ret < 0) {
             printk("[HAL GW HW] lora_recv timeout or error (%d)\n", ret);
-            return HAL_ERROR;
+            return SG_HAL_ERROR;
         }
         printk("[HAL GW HW] LoRa RX %d bytes  RSSI=%d dBm  SNR=%d dB\n",
                ret, rssi, snr);
-        return HAL_OK;
+        return SG_HAL_OK;
     }
 
     /*
@@ -139,13 +139,13 @@ int hal_radio_rx(uint8_t *packet, size_t len)
      */
     char line[128];
     if (fgets(line, sizeof(line), stdin) == NULL) {
-        return HAL_ERROR;
+        return SG_HAL_ERROR;
     }
 
     /* Expect "LORA_RX AABB...CC\n" */
     if (strncmp(line, "LORA_RX ", 8) != 0) {
         printk("[HAL GW SIM] Unexpected stdin line: %s", line);
-        return HAL_ERROR;
+        return SG_HAL_ERROR;
     }
 
     const char *hex = line + 8;
@@ -158,28 +158,24 @@ int hal_radio_rx(uint8_t *packet, size_t len)
     if (hex_len != SF_SLOT_SIZE * 2) {
         printk("[HAL GW SIM] Bad hex length %d (expected %d)\n",
                (int)hex_len, (int)(SF_SLOT_SIZE * 2));
-        return HAL_ERROR;
+        return SG_HAL_ERROR;
     }
 
     hex_to_bytes(hex, packet, SF_SLOT_SIZE);
     printk("[HAL GW SIM] LoRa RX simulated via stdin (%d bytes)\n", (int)SF_SLOT_SIZE);
-    return HAL_OK;
+    return SG_HAL_OK;
 }
 
 /* ── NB-IoT modem ───────────────────────────────────────────────────────── */
 
 int hal_modem_send_sms(const uint8_t *payload, size_t len)
 {
-    /*
-     * Real implementation: AT+CMGF=0, AT+CMGS="+destination", hex + CTRL+Z.
-     * Simulation: print hex so sim_bridge.py can pick it up and POST /sms.
-     */
-    printk("[HAL GW SIM] NB-IoT SMS (%d bytes): ", (int)len);
+    printk("[GATEWAY] NB-IoT TX simulation: ");
     for (size_t i = 0; i < len; i++) {
         printk("%02X", payload[i]);
     }
     printk("\n");
-    return HAL_OK;
+    return SG_HAL_OK;
 }
 
 /* ── role ───────────────────────────────────────────────────────────────── */
