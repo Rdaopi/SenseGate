@@ -10,7 +10,7 @@
 #include <Arduino.h>
 #include <string.h>
 
-static hal_role_t sim_role = HAL_ROLE_MASTER;
+static hal_role_t sim_role = HAL_ROLE_MASTER; /* demo: forced MASTER */
 static uint16_t   sim_seq  = 0;
 
 static const uint8_t SIM_PACKET[SF_SLOT_SIZE] = {

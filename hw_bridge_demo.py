@@ -45,7 +45,7 @@ RE_COLLECTOR_TX = re.compile(
     r"\[HAL (?:COLLECTOR SIM|HW)\] LoRa TX \d+ bytes: ([0-9A-Fa-f]+)"
 )
 RE_GATEWAY_NBIOT = re.compile(
-    r"\[GATEWAY\] NB-IoT TX simulation: ([0-9A-Fa-f]+)"
+    r"SMS:([0-9A-Fa-f]{50,})"
 )
 
 FULL_HEX_LEN = 100  # 50 bytes * 2 hex chars
@@ -72,6 +72,13 @@ def handle_gateway_line(line, base_url, counter):
     if not m:
         return
     hex_str = m.group(1).upper()
+    print(f"[bridge] SMS hex len={len(hex_str)} chars ({len(hex_str)//2} bytes)")
+    sys.stdout.flush()
+    if len(hex_str) < 100:
+        print(f"[bridge] WARNING: incomplete packet ({len(hex_str)} chars), skipping")
+        sys.stdout.flush()
+        return
+    hex_str = hex_str[:100]  # take exactly 50 bytes
     resp = post_sms(base_url, hex_str)
     if resp.get("error"):
         time.sleep(1)
@@ -107,13 +114,19 @@ async def ble_gateway_task(base_url, stop_event, counter):
         def on_notify(sender, data):
             nonlocal buf
             buf += data.decode("utf-8", errors="replace")
-            while "\n" in buf:
-                line, buf = buf.split("\n", 1)
-                line = line.strip()
-                if line:
-                    print(f"[GATEWAY/BLE] {line}")
-                    sys.stdout.flush()
-                    handle_gateway_line(line, base_url, counter)
+            # Extract complete SMS packets (exactly 100 hex chars) from raw buffer
+            while True:
+                m = re.search(r"SMS:([0-9A-Fa-f]{100})", buf)
+                if not m:
+                    break
+                hex_str = m.group(1).upper()
+                print(f"[GATEWAY/BLE] SMS received (100 chars)")
+                sys.stdout.flush()
+                handle_gateway_line(f"SMS:{hex_str}", base_url, counter)
+                buf = buf[m.end():]
+            # Keep buffer bounded
+            if len(buf) > 512:
+                buf = buf[-256:]
 
         try:
             async with BleakClient(device) as client:

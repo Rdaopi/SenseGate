@@ -1,4 +1,5 @@
 #include "role_election.h"
+#include "hal_select.h"
 #include <Arduino.h>
 
 #define SIM_DETECT_PIN  17   /* P0.17 = WisBlock IO1 on RAK19007 */
@@ -7,9 +8,13 @@ static node_role_t current_role = ROLE_UNSET;
 
 node_role_t role_election_run(void)
 {
+#ifdef HAL_USE_SIM
+    current_role = ROLE_MASTER;
+#else
     pinMode(SIM_DETECT_PIN, INPUT);
     int val = digitalRead(SIM_DETECT_PIN);
     current_role = (val == HIGH) ? ROLE_MASTER : ROLE_SLAVE;
+#endif
     return current_role;
 }
 

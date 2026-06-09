@@ -83,9 +83,22 @@ int hal_modem_send_sms(const uint8_t *payload, size_t len)
     line[pos++] = '\n';
     line[pos]   = '\0';
 
-    /* Send over BLE UART */
-    if (Bluefruit.connected())
-        bleuart.write((const uint8_t *)line, pos);
+    /* Build "SMS:<hex>\n" and send in 20-byte BLE chunks */
+    char ble_buf[8 + SF_SLOT_SIZE * 2 + 4];
+    int  bpos = 0;
+    bpos += snprintf(ble_buf + bpos, sizeof(ble_buf) - bpos, "SMS:");
+    for (size_t i = 0; i < len && bpos + 2 < (int)sizeof(ble_buf); i++) {
+        bpos += snprintf(ble_buf + bpos, sizeof(ble_buf) - bpos, "%02X", payload[i]);
+    }
+    ble_buf[bpos++] = '\n';
+    ble_buf[bpos]   = '\0';
+    /* send in 20-byte chunks — BLE MTU limit */
+    for (int sent = 0; sent < bpos; sent += 20) {
+        int chunk = bpos - sent;
+        if (chunk > 20) chunk = 20;
+        bleuart.write((const uint8_t *)ble_buf + sent, chunk);
+        delay(30);
+    }
 
     /* Mirror on USB serial */
     Serial.print(line);
