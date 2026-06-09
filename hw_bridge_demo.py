@@ -40,6 +40,7 @@ NUS_TX_CHAR_UUID = "6e400003-b5a3-f393-e0a9-e50e24dcca9e"  # RAK notifies on thi
 NUS_RX_CHAR_UUID = "6e400002-b5a3-f393-e0a9-e50e24dcca9e"  # PC writes on this
 
 GATEWAY_NAME = "SenseGate-GW"
+DEBUG = False  # set via --debug flag
 
 RE_COLLECTOR_TX = re.compile(
     r"\[HAL (?:COLLECTOR SIM|HW)\] LoRa TX \d+ bytes: ([0-9A-Fa-f]+)"
@@ -72,11 +73,13 @@ def handle_gateway_line(line, base_url, counter):
     if not m:
         return
     hex_str = m.group(1).upper()
-    print(f"[bridge] SMS hex len={len(hex_str)} chars ({len(hex_str)//2} bytes)")
-    sys.stdout.flush()
-    if len(hex_str) < 100:
-        print(f"[bridge] WARNING: incomplete packet ({len(hex_str)} chars), skipping")
+    if DEBUG:
+        print(f"[bridge] SMS hex len={len(hex_str)} chars ({len(hex_str)//2} bytes)")
         sys.stdout.flush()
+    if len(hex_str) < 100:
+        if DEBUG:
+            print(f"[bridge] WARNING: incomplete packet ({len(hex_str)} chars), skipping")
+            sys.stdout.flush()
         return
     hex_str = hex_str[:100]  # take exactly 50 bytes
     resp = post_sms(base_url, hex_str)
@@ -114,14 +117,18 @@ async def ble_gateway_task(base_url, stop_event, counter):
         def on_notify(sender, data):
             nonlocal buf
             buf += data.decode("utf-8", errors="replace")
+            if DEBUG:
+                print(f"[BLE/raw] {data.hex()}")
+                sys.stdout.flush()
             # Extract complete SMS packets (exactly 100 hex chars) from raw buffer
             while True:
                 m = re.search(r"SMS:([0-9A-Fa-f]{100})", buf)
                 if not m:
                     break
                 hex_str = m.group(1).upper()
-                print(f"[GATEWAY/BLE] SMS received (100 chars)")
-                sys.stdout.flush()
+                if DEBUG:
+                    print(f"[GATEWAY/BLE] SMS received (100 chars)")
+                    sys.stdout.flush()
                 handle_gateway_line(f"SMS:{hex_str}", base_url, counter)
                 buf = buf[m.end():]
             # Keep buffer bounded
@@ -131,12 +138,13 @@ async def ble_gateway_task(base_url, stop_event, counter):
         try:
             async with BleakClient(device) as client:
                 print(f"[BLE] Connected to {device.name}")
-                services = client.services
-                print("[BLE] Services found:")
-                for svc in services:
-                    print(f"  SVC {svc.uuid}")
-                    for ch in svc.characteristics:
-                        print(f"    CHR {ch.uuid}  props={ch.properties}")
+                if DEBUG:
+                    services = client.services
+                    print("[BLE] Services found:")
+                    for svc in services:
+                        print(f"  SVC {svc.uuid}")
+                        for ch in svc.characteristics:
+                            print(f"    CHR {ch.uuid}  props={ch.properties}")
                 await client.start_notify(NUS_TX_CHAR_UUID, on_notify)
                 print("[BLE] Subscribed to NUS TX — waiting for data...")
                 while not stop_event.is_set() and client.is_connected:
@@ -224,8 +232,11 @@ def main():
     parser.add_argument("--collector", default="COM3",                  help="NUCLEO serial port (default: COM3)")
     parser.add_argument("--baud",      type=int, default=115200,        help="Baud rate (default: 115200)")
     parser.add_argument("--url",       default="http://localhost:8080", help="Cloud base URL")
+    parser.add_argument("--debug",     action="store_true",             help="Enable verbose debug output")
     args = parser.parse_args()
 
+    global DEBUG
+    DEBUG = args.debug
     run(args.collector, args.baud, args.url)
 
 

@@ -57,17 +57,16 @@ int hal_init(void)
 
     lora_hardware_init(_hwConfig);
 
-    Radio.Init(NULL);
-    Radio.SetChannel(LORA_FREQUENCY);
-    Radio.SetRxConfig(MODEM_LORA, LORA_BANDWIDTH, LORA_SF, LORA_CR,
-                      0, LORA_PREAMBLE, 0, false, 0, false, false, 0, false, true);
-
     RadioEvents_t events;
     memset(&events, 0, sizeof(events));
     events.RxDone    = on_rx_done;
     events.RxError   = on_rx_error;
     events.RxTimeout = on_rx_timeout;
     Radio.Init(&events);
+
+    Radio.SetChannel(LORA_FREQUENCY);
+    Radio.SetRxConfig(MODEM_LORA, LORA_BANDWIDTH, LORA_SF, LORA_CR,
+                      0, LORA_PREAMBLE, 0, false, 0, false, false, 0, false, true);
 
     lora_ready = true;
     Serial.println("[HAL GW HW] SX1262 ready");
