@@ -73,18 +73,36 @@ This mode runs the full pipeline with simulated LoRa. The RAK4631 generates pack
 
 ### 1. Prerequisites
 
-- **Arduino IDE 2.x** with RAKwireless nRF Boards v1.3.3
+- **Arduino IDE 2.x**
 - **Python 3.10+**
 - **Docker Desktop**
 - **Bluetooth adapter** on your PC
 
-### 2. Install Python dependencies
+### 2. Install RAKwireless board package
+
+In Arduino IDE: **File → Preferences → Additional boards manager URLs**, add:
+```
+https://raw.githubusercontent.com/RAKwireless/RAKwireless-Arduino-BSP-Index/main/package_rakwireless_index.json
+```
+Then: **Tools → Board → Boards Manager** → search `RAKwireless nRF` → install v1.3.3.
+
+### 3. Patch the Arduino core
+
+The RAKwireless core requires a few fixes to compile correctly. Run once after installing:
+
+```bash
+python setup_arduino_core.py
+```
+
+Then restart Arduino IDE.
+
+### 4. Install Python dependencies
 
 ```bash
 pip install -r requirements.txt
 ```
 
-### 3. Flash the gateway firmware
+### 5. Flash the gateway firmware
 
 1. Open `node_gateway_arduino/node_gateway_arduino.ino` in Arduino IDE
 2. Select: **Tools → Board → WisBlock RAK4631**
@@ -93,7 +111,7 @@ pip install -r requirements.txt
 5. Double-press reset on RAK4631 to enter bootloader (red LED blinks)
 6. Upload (Ctrl+U) — wait for `Device programmed`
 
-### 4. Start the Docker stack
+### 6. Start the Docker stack
 
 ```bash
 cd cloud
@@ -102,7 +120,7 @@ docker compose up -d
 
 Grafana is available at [http://localhost:3000](http://localhost:3000) (admin/admin).
 
-### 5. Start the bridge
+### 7. Start the bridge
 
 ```bash
 python hw_bridge_demo.py
