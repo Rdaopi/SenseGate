@@ -2,39 +2,35 @@
 
 > Independent, secure predictive maintenance without touching the customer's network.
 
-SenseGate is an IIoT firmware system that enables Technowrapp to remotely monitor their industrial machines at customer sites — without requiring any access to the customer's LAN, Wi-Fi, or IT department. Data travels from the machine to the cloud via LoRa 868 MHz + NB-IoT binary SMS over SS7, completely independent of the customer's network infrastructure.
+SenseGate enables remote monitoring of industrial machines at customer sites without requiring access to the customer's LAN, Wi-Fi, or IT department. Data travels from the machine to the cloud via LoRa 868 MHz + NB-IoT binary SMS, completely independent of the customer's network.
 
 ---
 
-## How it works
+## System architecture
 
 ```
-[PLC + Sensors]
-      |
-      | Modbus RTU / I2C
+[PLC / Sensors]
+      | Modbus RTU
       v
-[Data Collector Node]  — STM32L073
+[Collector Node]  — NUCLEO-L073RZ + Ebyte E22-900T22S (SX1262)
   - Reads PLC registers every 35 min
-  - Bit-packs data into 19 bytes
+  - Packs data into 25 bytes
   - AES-128-CTR encrypts at source
   - Transmits via LoRa 868 MHz
       |
-      | LoRa 868 MHz (non-IP)
+      | LoRa 868 MHz
       v
-[Gateway Node]  — RAK4630 (nRF52840 + SX1262)
-  - Receives encrypted packets
-  - Buffers locally (200-day store-and-forward)
-  - Role election via GPIO SIM_DETECT:
-      SIM present  →  MASTER  →  NB-IoT SMS uplink
-      No SIM       →  SLAVE   →  LoRa relay only
+[Gateway Node]  — RAK4631 (nRF52840 + SX1262)
+  - Receives encrypted LoRa packets
+  - Buffers in RAM (200-slot store-and-forward)
+  - Role election via SIM_DETECT GPIO:
+      HIGH (SIM present) → MASTER → NB-IoT SMS uplink
+      LOW  (no SIM)      → SLAVE  → LoRa relay only
       |
-      | NB-IoT / SS7 / Binary SMS 140B
-      | (no customer internet required)
+      | NB-IoT SMS (demo: BLE → PC → HTTP)
       v
-[Twilio SMSC]  →  [AWS Lambda]  →  [TimescaleDB]  →  [Grafana]
+[Docker stack]  →  [Twilio sim]  →  [AWS IoT sim]  →  [TimescaleDB]  →  [Grafana]
 ```
-
-Data is encrypted at the sensor node and decrypted only at AWS Lambda. No intermediate component — gateway, Twilio, or any other — ever sees the plaintext.
 
 ---
 
@@ -42,231 +38,160 @@ Data is encrypted at the sensor node and decrypted only at AWS Lambda. No interm
 
 ```
 SenseGate/
-├── lib/                        # Shared firmware library
-│   ├── aes_ctr.c / .h          # AES-128-CTR (pure C, no dependencies)
-│   ├── payload_packer.c / .h   # 19-byte bit-packing algorithm
-│   ├── rolling_buffer.c / .h   # Rolling redundancy (current + previous packet)
-│   └── store_forward.c / .h    # 200-slot store-and-forward ring buffer
+├── node_collector/             # Collector firmware — NUCLEO-L073RZ (Zephyr RTOS)
+│   ├── src/
+│   │   ├── main.c
+│   │   ├── hal_sim.c           # Simulated HAL (no hardware needed)
+│   │   ├── hal_lora.c          # Real hardware HAL (Ebyte via Zephyr LoRa driver)
+│   │   └── hal_hw.c            # Modbus RTU hardware HAL
+│   └── include/
 │
-├── node_collector/             # Data collector firmware (STM32L073)
-│   ├── CMakeLists.txt
-│   ├── prj.conf
-│   ├── include/
-│   │   ├── hal.h               # Hardware abstraction layer interface
-│   │   └── modbus_sim.h        # Modbus register map
-│   └── src/
-│       ├── main.c              # Sensor loop: read → pack → encrypt → TX
-│       ├── hal_sim.c           # Simulated HAL (replace with hal_hw.c for hardware)
-│       └── modbus_sim.c        # Simulated Modbus slave (9 PLC registers)
+├── node_gateway_arduino/       # Gateway firmware — RAK4631 (Arduino)
+│   ├── node_gateway_arduino.ino
+│   ├── hal_select.h            # Switch between HAL_USE_SIM / HAL_USE_LORA
+│   ├── hal_sim.cpp             # Simulated HAL (no hardware needed)
+│   ├── hal_lora.cpp            # Real hardware HAL (SX1262 via SX126x-Arduino)
+│   ├── hal_modem.cpp           # NB-IoT HAL (demo: BLE output)
+│   ├── role_election.cpp       # SIM_DETECT GPIO role election
+│   └── store_forward.cpp       # RAM ring buffer (200 slots × 50 bytes)
 │
-├── node_gateway/               # Gateway firmware (RAK4630 / nRF52840)
-│   ├── CMakeLists.txt
-│   ├── prj.conf
-│   ├── include/
-│   │   ├── hal.h               # Hardware abstraction layer interface
-│   │   └── role_election.h     # Role election interface
-│   └── src/
-│       ├── main.c              # Gateway loop: RX → buffer → TX via NB-IoT
-│       ├── hal_sim.c           # Simulated HAL (replace with hal_hw.c for hardware)
-│       └── role_election.c     # Boot-time role election via SIM_DETECT GPIO
+├── cloud/                      # Docker stack
+│   ├── docker-compose.yml
+│   └── lambda/                 # Twilio sim + AWS IoT sim + TimescaleDB writer
 │
+├── hw_bridge.py                # Bridge: NUCLEO → gateway QEMU → cloud (legacy)
+├── hw_bridge_demo.py           # Bridge: NUCLEO → RAK4631 via BLE → cloud (demo)
+├── requirements.txt            # Python dependencies
 └── README.md
 ```
 
 ---
 
-## Firmware architecture
+## Quick start — demo (no LoRa hardware needed)
 
-### Payload format (19 bytes)
+This mode runs the full pipeline with simulated LoRa. The RAK4631 generates packets internally and forwards them to the cloud via BLE.
 
-| Bytes | Field | Resolution |
-|-------|-------|------------|
-| 0–1 | Temperature (12 bit) | 0.1 °C, range −40 to +85 °C |
-| 1–2 | Humidity (8 bit) | 0.5 %, range 0–100 % |
-| 2–3 | Vibration (10 bit) | 0.016 g, range 0–16 g |
-| 3–5 | Pressure (14 bit) | 0.06 hPa, range 300–1100 hPa |
-| 6–8 | PLC cycles (24 bit) | raw counter |
-| 9–10 | PLC hours (16 bit) | hours of operation |
-| 11 | PLC status (8 bit) | bit 0 = running, bit 1 = alarm |
-| 12–13 | Sequence number (16 bit) | packet counter |
-| 14 | Device ID (8 bit) | node identifier |
-| 15–16 | Reserved | — |
-| 17–18 | CRC16-CCITT | integrity check |
+### 1. Prerequisites
 
-### Transmission packet (38 bytes)
+- **Arduino IDE 2.x** with RAKwireless nRF Boards v1.3.3
+- **Python 3.10+**
+- **Docker Desktop**
+- **Bluetooth adapter** on your PC
 
-Every LoRa transmission carries `current packet (19B) + previous packet (19B)`. If a packet is lost in transmission, the next one automatically recovers it — no retransmission protocol needed.
+### 2. Install Python dependencies
 
-### AES-128-CTR encryption
+```bash
+pip install -r requirements.txt
+```
 
-- Stream cipher: 19 bytes in → 19 bytes out, no padding
-- Key stored in ATECC608B secure element (hardware tamper-proof)
-- Nonce derived from device ID + sequence number
-- Encryption happens at the sensor node — the gateway never decrypts
-- Pure C implementation, zero external dependencies
+### 3. Flash the gateway firmware
 
-### Store-and-forward
+1. Open `node_gateway_arduino/node_gateway_arduino.ino` in Arduino IDE
+2. Select: **Tools → Board → WisBlock RAK4631**
+3. Select: **Tools → SoftDevice → S140 6.1.1**
+4. Verify `hal_select.h` has `#define HAL_USE_SIM`
+5. Double-press reset on RAK4631 to enter bootloader (red LED blinks)
+6. Upload (Ctrl+U) — wait for `Device programmed`
 
-- Ring buffer: 200 slots × 38 bytes
-- Data is preserved during cellular outages
-- Buffer drains automatically in FIFO order when connection is restored
-- On real hardware: backed by W25Q32 NOR flash (1 MB = 26,000+ packets)
+### 4. Start the Docker stack
 
-### Role election
+```bash
+cd cloud
+docker compose up -d
+```
 
-At boot, the gateway reads the `SIM_DETECT` GPIO pin:
+Grafana is available at [http://localhost:3000](http://localhost:3000) (admin/admin).
 
-| SIM_DETECT | Role | Behaviour |
-|---|---|---|
-| HIGH (SIM present) | MASTER | Activates NB-IoT modem, sends binary SMS to cloud |
-| LOW (no SIM) | SLAVE | LoRa relay only, forwards packets to master |
+### 5. Start the bridge
 
-To change the master: remove the SIM from the broken gateway and insert it into any other node. The new master elects itself in seconds with no reconfiguration.
+```bash
+python hw_bridge_demo.py
+```
+
+The bridge scans for `SenseGate-GW` via BLE, connects automatically, and starts forwarding packets to the cloud. Add `--debug` for verbose output.
 
 ---
 
-## Hardware components
+## Full demo — with real LoRa hardware
 
-### Data collector node (STM32L073)
+Requires NUCLEO-L073RZ + Ebyte E22-900T22S soldered and flashed.
 
-| Component | Role | Interface |
-|---|---|---|
-| STM32L073 | Main MCU — ARM Cortex-M0+ @ 32 MHz | — |
-| SX1261 | LoRa TX — 868 MHz, SF7–SF12 | SPI |
-| ATECC608B | Secure element — AES-128 key storage | I2C |
-| MAX3485 | RS-485 transceiver for Modbus RTU | UART |
-| SHT45 | Temperature + humidity | I2C |
-| ADXL345 | Vibration / accelerometer | I2C |
-| BMP390 | Barometric pressure | I2C |
-| W25Q32 | NOR flash — store-and-forward buffer | SPI |
-| LiPo 2000 mAh | Battery — 3–4 year life | — |
-
-### Gateway node (RAK4630)
-
-| Component | Role | Interface |
-|---|---|---|
-| nRF52840 | Main MCU — ARM Cortex-M4 @ 64 MHz | — |
-| SX1262 | LoRa RX/TX — 868 MHz (integrated in RAK4630) | SPI |
-| Quectel BC660K-GL | NB-IoT / LTE-M modem (master only) | UART |
-| ATECC608B | Secure element | I2C |
-| W25Q32 | NOR flash — 200-day store-and-forward | SPI |
-| MAX3485 | RS-485 for local PLC (optional) | UART |
-
----
-
-## Building and running
-
-### Prerequisites
-
-- [nRF Connect SDK v2.9.0](https://developer.nordicsemi.com/nRF_Connect_SDK/doc/latest/nrf/installation.html)
-- [nRF Connect for VS Code](https://marketplace.visualstudio.com/items?itemName=nordic-semiconductor.nrf-connect-extension-pack)
-- [QEMU](https://www.qemu.org/download/) (for simulation)
-
-### Build — data collector
+### 1. Flash the collector (NUCLEO)
 
 ```bash
 cd node_collector
-west build -b qemu_cortex_m3 --pristine
+# Set HAL_USE_LORA in CMakeLists.txt
+west build -b nucleo_l073rz --pristine
+west flash
 ```
 
-### Run — data collector (QEMU)
+### 2. Flash the gateway (RAK4631)
+
+1. In `hal_select.h` change to `#define HAL_USE_LORA`
+2. Upload via Arduino IDE as above
+
+### 3. Start the bridge
 
 ```bash
-# Windows
-export PATH="/c/Program Files/qemu:$PATH"
-
-"/c/Program Files/qemu/qemu-system-arm.exe" \
-  -cpu cortex-m3 \
-  -machine lm3s6965evb \
-  -nographic \
-  -kernel build/node_collector/zephyr/zephyr.elf
+python hw_bridge_demo.py --collector COM3
 ```
 
-Press `CTRL+A` then `X` to exit QEMU.
-
-### Build — gateway
-
-```bash
-cd node_gateway
-west build -b qemu_cortex_m3 --pristine
-```
-
-### Run — gateway (QEMU)
-
-```bash
-"/c/Program Files/qemu/qemu-system-arm.exe" \
-  -cpu cortex-m3 \
-  -machine lm3s6965evb \
-  -nographic \
-  -kernel build/node_gateway/zephyr/zephyr.elf
-```
+Replace `COM3` with the actual NUCLEO serial port.
 
 ---
 
-## Hardware integration
+## LoRa parameters (must match on both nodes)
 
-The firmware uses a Hardware Abstraction Layer (HAL) that cleanly separates simulated and real hardware. To integrate physical components:
+| Parameter | Value |
+|---|---|
+| Frequency | 868 MHz |
+| Bandwidth | 125 kHz |
+| Spreading Factor | SF10 |
+| Coding Rate | 4/5 |
+| Preamble | 8 |
+| TX Power | 14 dBm |
 
-1. Create `src/hal_hw.c` in each project with the same function signatures as `hal_sim.c`
-2. Replace `hal_sim.c` with `hal_hw.c` in `CMakeLists.txt`
-3. Change the build target from `qemu_cortex_m3` to `rak4631_nrf52840`
+---
 
-The `main.c` and all library files remain unchanged.
+## Role election
 
-### HAL functions to implement in `hal_hw.c`
+At boot, the gateway reads `WB_IO1` (pin 17, WisBlock slot):
 
-| Function | Simulation | Hardware |
+| SIM_DETECT | Role | Behaviour |
 |---|---|---|
-| `hal_sensor_read()` | Modbus registers from RAM | UART Modbus RTU via MAX3485 |
-| `hal_flash_write/read()` | Ring buffer in RAM | SPI on W25Q32 |
-| `hal_radio_tx()` | printk | Zephyr LoRa driver on SX1261 |
-| `hal_radio_rx()` | Fixed test packet | Zephyr LoRa driver on SX1262 |
-| `hal_modem_send_sms()` | printk | AT commands on Quectel BC660K |
-| `hal_get_role()` | Variable in RAM | `gpio_pin_get(SIM_DETECT)` |
-| `hal_crypto_get_key()` | Hardcoded key | `atcab_read_zone()` on ATECC608B |
+| HIGH | MASTER | Sends packets via NB-IoT (demo: BLE → cloud) |
+| LOW | SLAVE | LoRa relay only |
 
-### Hardware validation sequence (in order)
-
-1. **NB-IoT SMS test** — connect Quectel BC660K via USB, send AT commands manually via PuTTY, verify Twilio receives the SMS. This is the most critical test — if it fails, everything else is blocked.
-2. **LoRa link test** — two RAK4630 nodes, one transmits a 38-byte packet, the other receives and prints. Verify range inside a metal industrial building.
-3. **Modbus RTU test** — connect MAX3485 to the Technowrapp PLC, verify register addresses with ModScan before hardcoding them in `modbus_sim.h`.
+To force MASTER in demo mode: `HAL_USE_SIM` always elects MASTER regardless of GPIO.
 
 ---
 
-## Key design decisions
+## Bridge options
 
-**Why LoRa 868 MHz?**
-Non-IP radio — physically impossible to route from SenseGate's radio into the customer's PLC network. 868 MHz penetrates metal and concrete structures better than 2.4 GHz (Wi-Fi, Bluetooth). EU868 band with 0.014% duty cycle — 70× below the ETSI 1% legal limit.
+```
+python hw_bridge_demo.py [--collector PORT] [--baud BAUD] [--url URL] [--debug]
 
-**Why NB-IoT + SS7?**
-SMS travels via the SS7 signaling plane — the same infrastructure that carries voice calls. It is completely independent of the internet. The customer's IT department has no visibility and no control over it. NB-IoT provides 20 dB better indoor penetration than standard 4G LTE.
-
-**Why AES-128-CTR and not AES-128-CBC?**
-CTR is a stream cipher: 19 bytes in → 19 bytes out, no padding. This is essential because the payload must fit exactly into the binary SMS budget. CBC would add up to 16 bytes of padding, breaking the 140-byte SMS math.
-
-**Why a pure C AES implementation?**
-The nRF Connect SDK (v2.9.0) PSA Crypto layer is not easily available on QEMU targets without NRF_SECURITY. The pure C implementation is functionally identical, has zero dependencies, compiles on any Zephyr target, and will be replaced by ATECC608B hardware acceleration on the real chip.
-
-**Why same PCB for master and gateway?**
-Single SKU simplifies logistics and dramatically improves resilience. If the master gateway fails, a technician moves the SIM card to any other node — no special hardware, no reconfiguration, no IT involvement. The new master boots in seconds.
+  --collector  NUCLEO serial port (default: COM3)
+  --baud       Baud rate (default: 115200)
+  --url        Cloud base URL (default: http://localhost:8080)
+  --debug      Verbose BLE and packet debug output
+```
 
 ---
 
-## Modbus register map
+## Hardware
 
-Register addresses to be confirmed with Technowrapp before hardware integration.
+### Collector node
+| Component | Role |
+|---|---|
+| NUCLEO-L073RZ | STM32L073 dev board |
+| Ebyte E22-900T22S | SX1262 LoRa module (868 MHz) |
 
-| Register | Address | Encoding | Range |
-|---|---|---|---|
-| Temperature | 40001 | raw × 10 | −400 to +850 |
-| Humidity | 40002 | raw × 2 | 0 to 200 |
-| Vibration | 40003 | raw × 64 | 0 to 1023 |
-| Pressure HIGH | 40004 | (raw − 300) × 16 HIGH word | — |
-| Pressure LOW | 40005 | (raw − 300) × 16 LOW word | — |
-| PLC cycles HIGH | 40006 | 32-bit counter HIGH word | — |
-| PLC cycles LOW | 40007 | 32-bit counter LOW word | — |
-| PLC hours | 40008 | hours of operation | 0 to 65535 |
-| PLC status | 40009 | bit 0 = running, bit 1 = alarm | — |
+### Gateway node
+| Component | Role |
+|---|---|
+| RAK4631 | nRF52840 + SX1262, BLE 5.0 |
+| RAK19007 | WisBlock base board |
 
 ---
 
@@ -274,27 +199,17 @@ Register addresses to be confirmed with Technowrapp before hardware integration.
 
 | Component | Status |
 |---|---|
-| Bit-packing algorithm | ✅ Complete — validated on QEMU |
-| AES-128-CTR encryption | ✅ Complete — validated on QEMU |
-| Rolling redundancy | ✅ Complete — validated on QEMU |
-| Store-and-forward buffer | ✅ Complete — validated on QEMU |
-| HAL abstraction layer | ✅ Complete |
-| Role election | ✅ Complete — validated on QEMU |
-| Modbus RTU simulation | ✅ Complete — validated on QEMU |
-| LoRa driver (hardware) | ⏳ Pending hardware |
-| NB-IoT AT commands | ⏳ Pending hardware |
-| ATECC608B key read | ⏳ Pending hardware |
-| W25Q32 SPI flash | ⏳ Pending hardware |
-| Modbus RTU (real PLC) | ⏳ Pending PLC register map from Technowrapp |
-| Cloud pipeline | ⏳ In progress |
+| Collector firmware (sim) | ✅ Working on NUCLEO |
+| Gateway firmware (sim) | ✅ Working on RAK4631 |
+| BLE uplink (gateway → PC) | ✅ Working |
+| Cloud pipeline (Docker) | ✅ Working |
+| Grafana dashboard | ✅ Working |
+| LoRa real hardware | ⏳ Pending Ebyte soldering |
+| NB-IoT real hardware | ⏳ Pending modem |
+| Modbus RTU (real PLC) | ⏳ Pending PLC register map |
 
 ---
 
 ## License
 
-SenseGate firmware and algorithms are proprietary IP developed by the SenseGate team.
-
-Third-party components used:
-- **Zephyr RTOS** — Apache 2.0
-- **nRF Connect SDK** — Nordic Semiconductor (various open source licenses)
-- **QEMU** — GPL v2
+Proprietary — SenseGate team. All rights reserved.
