@@ -8,12 +8,6 @@
 
 BLEUart bleuart;
 
-static void ble_println(const char *s)
-{
-    if (!Bluefruit.connected()) return;
-    bleuart.write((const uint8_t *)s, strlen(s));
-    bleuart.write((const uint8_t *)"\n", 1);
-}
 
 void setup()
 {
@@ -73,7 +67,12 @@ void loop()
     if (role == ROLE_MASTER) {
         uint8_t out[SF_SLOT_SIZE];
         while (hal_flash_read(out, SF_SLOT_SIZE) == SG_HAL_OK) {
-            hal_modem_send_sms(out, SF_SLOT_SIZE);
+            if (hal_modem_send_sms(out, SF_SLOT_SIZE) != SG_HAL_OK) {
+                /* uplink down — put the packet back and retry next cycle
+                 * (the slot we just popped guarantees room) */
+                hal_flash_write(out, SF_SLOT_SIZE);
+                break;
+            }
         }
     }
 

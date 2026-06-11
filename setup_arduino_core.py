@@ -10,11 +10,27 @@ Usage:
 
 import os
 import sys
-import re
 
-CORE_BASE = os.path.expandvars(
-    r"%LOCALAPPDATA%\Arduino15\packages\rakwireless\hardware\nrf52\1.3.3"
-)
+def _find_core_base():
+    candidates = []
+    if sys.platform == "win32":
+        local = os.environ.get("LOCALAPPDATA", "")
+        if local:
+            candidates.append(os.path.join(local, "Arduino15"))
+    elif sys.platform == "darwin":
+        candidates.append(os.path.expanduser("~/Library/Arduino15"))
+    else:
+        candidates.append(os.path.expanduser("~/.arduino15"))
+        candidates.append(os.path.expanduser("~/.Arduino15"))
+    suffix = os.path.join("packages", "rakwireless", "hardware", "nrf52", "1.3.3")
+    for base in candidates:
+        path = os.path.join(base, suffix)
+        if os.path.exists(path):
+            return path
+    # Return Windows-style path for the error message even on non-Windows
+    return os.path.join(candidates[0] if candidates else "~/.arduino15", suffix)
+
+CORE_BASE = _find_core_base()
 
 PATCHES = {
     # 1. platform.txt — logger=0, genpkg path, upload flags

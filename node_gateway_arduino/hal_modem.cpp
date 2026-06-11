@@ -71,37 +71,48 @@ extern BLEUart bleuart;
 
 void hal_modem_init(void) {}
 
+/* Encode `len` bytes as uppercase hex into `dst` (must have room for 2*len+1). */
+static void bytes_to_hex(const uint8_t *src, size_t len, char *dst, size_t dst_size)
+{
+    size_t pos = 0;
+    for (size_t i = 0; i < len && pos + 2 < dst_size; i++) {
+        pos += snprintf(dst + pos, dst_size - pos, "%02X", src[i]);
+    }
+    dst[pos] = '\0';
+}
+
 int hal_modem_send_sms(const uint8_t *payload, size_t len)
 {
-    /* Build full line: "[GATEWAY] NB-IoT TX simulation: <hex>\n" */
-    char line[8 + SF_SLOT_SIZE * 2 + 64];
-    int  pos = 0;
-    pos += snprintf(line + pos, sizeof(line) - pos, "[GATEWAY] NB-IoT TX simulation: ");
-    for (size_t i = 0; i < len && pos + 2 < (int)sizeof(line); i++) {
-        pos += snprintf(line + pos, sizeof(line) - pos, "%02X", payload[i]);
-    }
-    line[pos++] = '\n';
-    line[pos]   = '\0';
+    char hex[SF_SLOT_SIZE * 2 + 1];
+    bytes_to_hex(payload, len, hex, sizeof(hex));
 
-    /* Build "SMS:<hex>\n" and send in 20-byte BLE chunks */
-    char ble_buf[8 + SF_SLOT_SIZE * 2 + 4];
-    int  bpos = 0;
-    bpos += snprintf(ble_buf + bpos, sizeof(ble_buf) - bpos, "SMS:");
-    for (size_t i = 0; i < len && bpos + 2 < (int)sizeof(ble_buf); i++) {
-        bpos += snprintf(ble_buf + bpos, sizeof(ble_buf) - bpos, "%02X", payload[i]);
-    }
-    ble_buf[bpos++] = '\n';
-    ble_buf[bpos]   = '\0';
-    /* send in 20-byte chunks — BLE MTU limit */
-    for (int sent = 0; sent < bpos; sent += 20) {
-        int chunk = bpos - sent;
+    /* Mirror on USB serial */
+    Serial.print("[GATEWAY] NB-IoT TX simulation: ");
+    Serial.println(hex);
+
+    /* No BLE central connected: report failure so the caller keeps the
+     * packet in the store-and-forward buffer instead of dropping it. */
+    if (!Bluefruit.connected()) return SG_HAL_ERROR;
+
+    /* Send "SMS:<hex>\n" over BLE in 20-byte chunks */
+    char ble_buf[4 + SF_SLOT_SIZE * 2 + 2];  /* "SMS:" + hex + "\n\0" */
+    int  blen = snprintf(ble_buf, sizeof(ble_buf), "SMS:%s\n", hex);
+    int  retries = 0;
+    for (int sent = 0; sent < blen; ) {
+        int chunk = blen - sent;
         if (chunk > 20) chunk = 20;
-        bleuart.write((const uint8_t *)ble_buf + sent, chunk);
+        int written = (int)bleuart.write((const uint8_t *)ble_buf + sent, chunk);
+        if (written <= 0) {
+            /* TX FIFO congested — back off, then give up so the caller re-queues */
+            if (++retries > 5) return SG_HAL_ERROR;
+            delay(50);
+            continue;
+        }
+        sent += written;
+        retries = 0;
         delay(30);
     }
 
-    /* Mirror on USB serial */
-    Serial.print(line);
     return SG_HAL_OK;
 }
 

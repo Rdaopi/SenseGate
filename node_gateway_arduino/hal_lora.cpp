@@ -22,22 +22,31 @@
 static bool lora_ready = false;
 static hal_role_t hw_role = HAL_ROLE_MASTER;
 
-static volatile bool rx_done = false;
+/* RX ring buffer: on nRF52 the SX126x-Arduino library delivers RxDone from a
+ * background task, so frames can arrive while loop() is busy (e.g. draining
+ * the modem). A one-deep buffer would drop them; the ring keeps them until
+ * hal_radio_rx is called. Single producer (radio task) / single consumer
+ * (loop) — only rx_count is shared, guarded by interrupt locks. */
+#define RX_RING_SLOTS 4
+static uint8_t rx_ring[RX_RING_SLOTS][SF_SLOT_SIZE];
+static volatile int  rx_head  = 0;
+static volatile int  rx_tail  = 0;
+static volatile int  rx_count = 0;
 static volatile bool rx_error = false;
-static uint8_t rx_buf[SF_SLOT_SIZE];
-static uint8_t rx_len = 0;
 
 static void on_rx_done(uint8_t *payload, uint16_t size, int16_t rssi, int8_t snr)
 {
-    if (size >= SF_SLOT_SIZE) {
-        memcpy(rx_buf, payload, SF_SLOT_SIZE);
-        rx_len = SF_SLOT_SIZE;
+    if (size >= SF_SLOT_SIZE && rx_count < RX_RING_SLOTS) {
+        memcpy(rx_ring[rx_tail], payload, SF_SLOT_SIZE);
+        rx_tail = (rx_tail + 1) % RX_RING_SLOTS;
+        noInterrupts();
+        rx_count++;
+        interrupts();
         Serial.print("[HAL GW HW] LoRa RX RSSI=");
         Serial.print(rssi);
         Serial.print(" SNR=");
         Serial.println(snr);
     }
-    rx_done = true;
 }
 
 static void on_rx_error(void)
@@ -94,18 +103,25 @@ int hal_radio_rx(uint8_t *packet, size_t len)
 {
     if (!lora_ready || len < SF_SLOT_SIZE) return SG_HAL_ERROR;
 
-    rx_done = false;
-    rx_error = false;
-    Radio.Rx(LORA_RX_TIMEOUT);
+    /* Frame already buffered from a previous RX window? Consume it directly. */
+    if (rx_count == 0) {
+        rx_error = false;
+        Radio.Rx(LORA_RX_TIMEOUT);
 
-    uint32_t start = millis();
-    while (!rx_done && !rx_error && (millis() - start < LORA_RX_TIMEOUT + 500)) {
-        Radio.IrqProcess();
-        delay(1);
+        /* RxDone is delivered by the library's background task on nRF52 —
+         * no IrqProcess() pump needed, just wait for the ring to fill. */
+        uint32_t start = millis();
+        while (rx_count == 0 && !rx_error && (millis() - start < LORA_RX_TIMEOUT + 500)) {
+            delay(1);
+        }
     }
 
-    if (rx_done) {
-        memcpy(packet, rx_buf, SF_SLOT_SIZE);
+    if (rx_count > 0) {
+        memcpy(packet, rx_ring[rx_head], SF_SLOT_SIZE);
+        rx_head = (rx_head + 1) % RX_RING_SLOTS;
+        noInterrupts();
+        rx_count--;
+        interrupts();
         return SG_HAL_OK;
     }
     return SG_HAL_ERROR;
