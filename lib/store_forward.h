@@ -9,8 +9,10 @@
  * RAK4631 (nRF52840) has 256 KB RAM — 200 slots * 50 bytes = 10 KB.
  * NUCLEO-L073RZ (20 KB RAM) should use 20 slots max.
  */
-#define SF_MAX_SLOTS   200
-#define SF_SLOT_SIZE   TX_PACKET_SIZE   /* 38 byte */
+#ifndef SF_MAX_SLOTS
+#define SF_MAX_SLOTS   200              /* overridable from CMake for small-RAM boards */
+#endif
+#define SF_SLOT_SIZE   TX_PACKET_SIZE   /* 50 byte: current + previous ciphertext */
 
 /* Stati possibili del buffer */
 #define SF_OK          0

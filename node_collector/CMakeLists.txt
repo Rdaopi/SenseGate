@@ -7,7 +7,7 @@ zephyr_include_directories(../lib)
 
 target_sources(app PRIVATE
     src/main.c
-    src/hal_sim.c
+    src/hal_ebyte_uart.c
     src/modbus_sim.c
     ../lib/aes_ctr.c
     ../lib/payload_packer.c
@@ -15,6 +15,12 @@ target_sources(app PRIVATE
     ../lib/store_forward.c
     src/test_runner.c
 )
+
+# NUCLEO-L073RZ has 20 KB RAM: shrink the store-and-forward buffer
+# (20 slots x 50 B = 1 KB instead of the 10 KB default sized for the RAK4631).
+if(BOARD STREQUAL "nucleo_l073rz")
+    target_compile_definitions(app PRIVATE SF_MAX_SLOTS=20)
+endif()
 
 # Bake current Unix timestamp so machine_timestamp reflects today's date.
 # Uses Python (always available in the NCS toolchain) for reliable epoch output.
@@ -34,6 +40,6 @@ target_compile_definitions(app PRIVATE SIM_BUILD_TS=${SIM_BUILD_TS}U)
 # SIM_TX_INTERVAL_MS: ms between packets.
 # Change this value and rebuild to adjust cadence.
 # 2000 = 2s for testing, 300000 = 5min for production.
-set(_tx_interval 2000)
+set(_tx_interval 10000)
 message(STATUS "SenseGate TX interval: ${_tx_interval} ms")
 target_compile_definitions(app PRIVATE SIM_TX_INTERVAL_MS=${_tx_interval}U)

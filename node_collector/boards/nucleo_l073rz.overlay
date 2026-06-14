@@ -1,0 +1,21 @@
+/*
+ * NUCLEO-L073RZ overlay — Ebyte E22-900T22S on USART1
+ *
+ * The module's fixed config-mode baud rate is 9600 8N1; we keep the whole
+ * link at 9600 so no baud switching is needed (50-byte frame = ~52 ms).
+ *
+ *   PA9  (CN10 pin 21, D8) -> E22 RXD
+ *   PA10 (CN10 pin 33, D2) <- E22 TXD
+ *
+ * M0/M1/AUX are plain GPIOs on port C, configured in hal_ebyte_uart.c
+ * (PC0 = M0, PC1 = M1, PC2 = AUX).
+ *
+ * The console stays on USART2 (PA2/PA3) through the ST-LINK VCP.
+ */
+
+&usart1 {
+	pinctrl-0 = <&usart1_tx_pa9 &usart1_rx_pa10>;
+	pinctrl-names = "default";
+	current-speed = <9600>;
+	status = "okay";
+};

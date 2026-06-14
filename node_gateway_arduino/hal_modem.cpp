@@ -90,11 +90,10 @@ int hal_modem_send_sms(const uint8_t *payload, size_t len)
     Serial.print("[GATEWAY] NB-IoT TX simulation: ");
     Serial.println(hex);
 
-    /* No BLE central connected: report failure so the caller keeps the
-     * packet in the store-and-forward buffer instead of dropping it. */
-    if (!Bluefruit.connected()) return SG_HAL_ERROR;
-
-    /* Send "SMS:<hex>\n" over BLE in 20-byte chunks */
+    /* Send "SMS:<hex>\n" over BLE in 20-byte chunks. We do NOT gate on
+     * Bluefruit.connected() — it can read false immediately after a central
+     * connects, which silently stalled the whole uplink. bleuart.write()
+     * returns 0 when nobody is subscribed, which we handle below. */
     char ble_buf[4 + SF_SLOT_SIZE * 2 + 2];  /* "SMS:" + hex + "\n\0" */
     int  blen = snprintf(ble_buf, sizeof(ble_buf), "SMS:%s\n", hex);
     int  retries = 0;
@@ -103,7 +102,8 @@ int hal_modem_send_sms(const uint8_t *payload, size_t len)
         if (chunk > 20) chunk = 20;
         int written = (int)bleuart.write((const uint8_t *)ble_buf + sent, chunk);
         if (written <= 0) {
-            /* TX FIFO congested — back off, then give up so the caller re-queues */
+            /* No subscriber yet or TX FIFO congested — back off, then give up
+             * so the caller re-queues the packet in store-and-forward. */
             if (++retries > 5) return SG_HAL_ERROR;
             delay(50);
             continue;

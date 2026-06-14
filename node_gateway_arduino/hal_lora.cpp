@@ -10,14 +10,20 @@
 #include <Arduino.h>
 #include <SX126x-Arduino.h>
 
-/* LoRa link parameters — must match node_collector */
-#define LORA_FREQUENCY   868000000
+/* forward declaration — defined in node_gateway_arduino.ino */
+extern void ble_println(const char *s);
+
+/* LoRa link parameters — E22-900T22S at REG0=0x62 (air rate 2.4k = SF9 BW125)
+ * REG2=0x12 → channel 18 = 850.125 + 18 = 868.125 MHz
+ * Syncword: E22 uses private syncword 0x12 → SX1262 register value 0x1424
+ *           SetPublicNetwork(false) sets 0x1424, SetPublicNetwork(true) sets 0x3444 */
+#define LORA_FREQUENCY   868125000
 #define LORA_BANDWIDTH   0          /* 125 kHz */
-#define LORA_SF          10
-#define LORA_CR          1          /* 4/5 */
-#define LORA_PREAMBLE    8
+#define LORA_SF          9          /* E22 air rate 2.4k = SF9 */
+#define LORA_CR          1          /* 4/5 — E22 fixes CR internally */
+#define LORA_PREAMBLE    8          /* standard LoRa default */
 #define LORA_TX_DBM      14
-#define LORA_RX_TIMEOUT  10000      /* ms */
+#define LORA_RX_TIMEOUT  8000       /* ms */
 
 static bool lora_ready = false;
 static hal_role_t hw_role = HAL_ROLE_MASTER;
@@ -36,27 +42,31 @@ static volatile bool rx_error = false;
 
 static void on_rx_done(uint8_t *payload, uint16_t size, int16_t rssi, int8_t snr)
 {
-    if (size >= SF_SLOT_SIZE && rx_count < RX_RING_SLOTS) {
-        memcpy(rx_ring[rx_tail], payload, SF_SLOT_SIZE);
+    char buf[64];
+    snprintf(buf, sizeof(buf), "[GW] RX SF9 size=%u RSSI=%d SNR=%d", size, rssi, snr);
+    Serial.println(buf);
+    ble_println(buf);
+
+    if (size > 0 && rx_count < RX_RING_SLOTS) {
+        uint16_t copy = size < SF_SLOT_SIZE ? size : SF_SLOT_SIZE;
+        memcpy(rx_ring[rx_tail], payload, copy);
         rx_tail = (rx_tail + 1) % RX_RING_SLOTS;
         noInterrupts();
         rx_count++;
         interrupts();
-        Serial.print("[HAL GW HW] LoRa RX RSSI=");
-        Serial.print(rssi);
-        Serial.print(" SNR=");
-        Serial.println(snr);
     }
 }
 
 static void on_rx_error(void)
 {
     rx_error = true;
+    Serial.println("[GW] RX error");
 }
 
 static void on_rx_timeout(void)
 {
     rx_error = true;
+    Serial.println("[GW] RX timeout");
 }
 
 int hal_init(void)
@@ -64,7 +74,15 @@ int hal_init(void)
     Serial.println("[HAL GW HW] Initializing SX1262...");
     sf_init();
 
-    lora_hardware_init(_hwConfig);
+    /* RAK4631: use the board-specific init that configures the WisBlock Core
+     * SX1262 pin mapping automatically. Using lora_hardware_init() with an
+     * uninitialized _hwConfig hangs forever waiting on the BUSY line. */
+    uint32_t rc = lora_rak4630_init();
+    if (rc != 0) {
+        Serial.print("[HAL GW HW] lora_rak4630_init failed rc=");
+        Serial.println(rc);
+        return SG_HAL_ERROR;
+    }
 
     RadioEvents_t events;
     memset(&events, 0, sizeof(events));
@@ -73,12 +91,14 @@ int hal_init(void)
     events.RxTimeout = on_rx_timeout;
     Radio.Init(&events);
 
+    Radio.SetPublicNetwork(false);  /* E22 private syncword 0x12 → 0x1424 */
+
     Radio.SetChannel(LORA_FREQUENCY);
     Radio.SetRxConfig(MODEM_LORA, LORA_BANDWIDTH, LORA_SF, LORA_CR,
                       0, LORA_PREAMBLE, 0, false, 0, false, false, 0, false, true);
 
     lora_ready = true;
-    Serial.println("[HAL GW HW] SX1262 ready");
+    Serial.println("[HAL GW HW] SX1262 ready v2");
     return SG_HAL_OK;
 }
 
@@ -103,17 +123,33 @@ int hal_radio_rx(uint8_t *packet, size_t len)
 {
     if (!lora_ready || len < SF_SLOT_SIZE) return SG_HAL_ERROR;
 
-    /* Frame already buffered from a previous RX window? Consume it directly. */
     if (rx_count == 0) {
-        rx_error = false;
-        Radio.Rx(LORA_RX_TIMEOUT);
+        Radio.Sleep();
 
-        /* RxDone is delivered by the library's background task on nRF52 —
-         * no IrqProcess() pump needed, just wait for the ring to fill. */
+        /* E22 private syncword = 0x12 → SX1262 stores as 0x1424.
+         * SetPublicNetwork(false) writes 0x1424 to regs 0x0740/0x0741. */
+        Radio.SetPublicNetwork(false);
+
+        Radio.SetRxConfig(MODEM_LORA, LORA_BANDWIDTH, LORA_SF, LORA_CR,
+                          0, LORA_PREAMBLE, 0, false, 0, false,
+                          false, 0, false, true);
+
+        rx_error = false;
+        Radio.Rx(0);
+
+        /* Read back syncword registers to confirm what's actually set */
+        uint8_t sw0 = SX126xReadRegister(0x0740);
+        uint8_t sw1 = SX126xReadRegister(0x0741);
+        char swmsg[48];
+        snprintf(swmsg, sizeof(swmsg), "[GW] SW=%02X%02X SF9 868MHz", sw0, sw1);
+        Serial.println(swmsg);
+        ble_println(swmsg);
+
         uint32_t start = millis();
-        while (rx_count == 0 && !rx_error && (millis() - start < LORA_RX_TIMEOUT + 500)) {
-            delay(1);
+        while (rx_count == 0 && !rx_error && (millis() - start < LORA_RX_TIMEOUT)) {
+            delay(10);
         }
+        Radio.Sleep();
     }
 
     if (rx_count > 0) {

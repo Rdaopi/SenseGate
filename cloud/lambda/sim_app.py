@@ -195,6 +195,8 @@ def sms():
     normalized = from_number.lstrip("+").replace(" ", "")
     device_id = msisdn_map.get(normalized, 1)
 
+    logger.info("SMS rx from=%s body=%s", from_number, sms_body)
+
     results = []
     for i in range(2):
         ct = raw[i * PAYLOAD_SIZE:(i + 1) * PAYLOAD_SIZE]
@@ -202,7 +204,8 @@ def sms():
         # Converges in 1–2 steps under normal conditions
         found = None
         guess = 0
-        for _ in range(16):
+        last_exc = None
+        for _ in range(65536):
             try:
                 pt = decrypt(ct, device_id, guess)
                 reading = parse(pt)
@@ -210,8 +213,15 @@ def sms():
                     found = (guess, reading)
                     break
                 guess = reading["sequence"]
-            except Exception:
+            except ValueError as exc:
+                # CRC mismatch with current guess — try next sequence number
+                last_exc = exc
+                guess = (guess + 1) & 0xFFFF
+            except Exception as exc:
+                last_exc = exc
                 break
+        logger.info("  slot %d ct=%s found=%s err=%s", i, ct.hex().upper(),
+                    (found[0] if found else None), last_exc)
         if found:
             seq, reading = found
             alerts = _detect_alerts(reading)

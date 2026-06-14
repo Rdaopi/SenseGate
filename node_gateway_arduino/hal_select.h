@@ -6,5 +6,5 @@
  *
  * Comment/uncomment to switch.
  */
-#define HAL_USE_SIM
-// #define HAL_USE_LORA
+// #define HAL_USE_SIM
+#define HAL_USE_LORA

@@ -5,7 +5,7 @@
 #include <string.h>
 
 /* ── LCG random ─────────────────────────────────────────── */
-static uint32_t rng_state = 0xDEADBEEF;
+static uint32_t rng_state;
 
 static uint32_t lcg_next(void)
 {
@@ -104,6 +104,7 @@ void test_runner_run(const test_config_t *cfg, tx_callback_t on_tx)
 
     uint16_t global_seq = 0;
     uint32_t base_ts    = modbus_sim_base_ts();
+    rng_state = base_ts ^ (uint32_t)k_uptime_get();
     uint32_t cycle      = 0;
 
     while (1) {
@@ -139,6 +140,10 @@ void test_runner_run(const test_config_t *cfg, tx_callback_t on_tx)
 
                 on_tx(&data, global_seq, sc->name);
                 global_seq++;
+
+                /* pace transmissions — on real radio this also keeps the
+                 * 868 MHz duty cycle under control */
+                k_msleep(SIM_TX_INTERVAL_MS);
             }
         }
         cycle++;
