@@ -3,13 +3,32 @@
   "title": "SenseGate — Technowrapp IIoT",
   "description": "Predictive maintenance dashboard for Technowrapp wrapping machines",
   "schemaVersion": 38,
-  "version": 2,
+  "version": 4,
   "refresh": "30s",
   "time": { "from": "now/d", "to": "now" },
   "timezone": "browser",
   "tags": ["sensegate", "iiot", "technowrapp"],
   "style": "dark",
   "graphTooltip": 1,
+
+  "templating": {
+    "list": [
+      {
+        "name": "pallet_id",
+        "label": "Pallet ID",
+        "type": "query",
+        "datasource": { "type": "postgres", "uid": "sensegate-pg" },
+        "query": "SELECT DISTINCT CAST(pallet_id AS TEXT) FROM sensor_readings WHERE device_id=1 ORDER BY 1 DESC",
+        "refresh": 2,
+        "includeAll": true,
+        "allValue": "0",
+        "multi": false,
+        "current": {},
+        "sort": 1,
+        "hide": 0
+      }
+    ]
+  },
 
   "panels": [
 
@@ -53,8 +72,8 @@
         }
       },
       "targets": [{
-        "rawSql": "SELECT NOW() AS time, state FROM sensor_readings WHERE device_id=1 ORDER BY time DESC LIMIT 1",
-        "format": "table", "refId": "A"
+        "rawSql": "SELECT time, state FROM sensor_readings WHERE device_id=1 AND $__timeFilter(time) AND ($pallet_id = 0 OR pallet_id = $pallet_id) ORDER BY time DESC LIMIT 1",
+        "format": "time_series", "refId": "A"
       }]
     },
 
@@ -79,8 +98,8 @@
         }
       },
       "targets": [{
-        "rawSql": "SELECT NOW() AS time, pallet_id FROM sensor_readings WHERE device_id=1 ORDER BY time DESC LIMIT 1",
-        "format": "table", "refId": "A"
+        "rawSql": "SELECT time, pallet_id FROM sensor_readings WHERE device_id=1 AND $__timeFilter(time) AND ($pallet_id = 0 OR pallet_id = $pallet_id) ORDER BY time DESC LIMIT 1",
+        "format": "time_series", "refId": "A"
       }]
     },
 
@@ -112,8 +131,8 @@
         }
       },
       "targets": [{
-        "rawSql": "SELECT NOW() AS time, wrap_time_s FROM sensor_readings WHERE device_id=1 ORDER BY time DESC LIMIT 1",
-        "format": "table", "refId": "A"
+        "rawSql": "SELECT time, wrap_time_s FROM sensor_readings WHERE device_id=1 AND $__timeFilter(time) AND ($pallet_id = 0 OR pallet_id = $pallet_id) ORDER BY time DESC LIMIT 1",
+        "format": "time_series", "refId": "A"
       }]
     },
 
@@ -138,7 +157,7 @@
         }
       },
       "targets": [{
-        "rawSql": "SELECT NOW() AS time, MAX(running_seconds) FROM sensor_readings WHERE device_id=1 AND time >= date_trunc('day', NOW())",
+        "rawSql": "SELECT NOW() AS time, MAX(running_seconds) FROM sensor_readings WHERE device_id=1 AND time >= date_trunc('day', NOW()) AND ($pallet_id = 0 OR pallet_id = $pallet_id)",
         "format": "table", "refId": "A"
       }]
     },
@@ -171,7 +190,7 @@
         }
       },
       "targets": [{
-        "rawSql": "SELECT NOW() AS time, MAX(alarm_seconds) FROM sensor_readings WHERE device_id=1 AND time >= date_trunc('day', NOW())",
+        "rawSql": "SELECT NOW() AS time, MAX(alarm_seconds) FROM sensor_readings WHERE device_id=1 AND time >= date_trunc('day', NOW()) AND ($pallet_id = 0 OR pallet_id = $pallet_id)",
         "format": "table", "refId": "A"
       }]
     },
@@ -196,7 +215,7 @@
         }
       },
       "targets": [{
-        "rawSql": "SELECT NOW() AS time, COUNT(*) AS packets FROM sensor_readings WHERE device_id=1",
+        "rawSql": "SELECT NOW() AS time, COUNT(*) AS packets FROM sensor_readings WHERE device_id=1 AND ($pallet_id = 0 OR pallet_id = $pallet_id)",
         "format": "table", "refId": "A"
       }]
     },
@@ -252,7 +271,7 @@
         }
       },
       "targets": [{
-        "rawSql": "SELECT time, state FROM sensor_readings WHERE device_id=1 AND $__timeFilter(time) ORDER BY time",
+        "rawSql": "SELECT time, state FROM sensor_readings WHERE device_id=1 AND $__timeFilter(time) AND ($pallet_id = 0 OR pallet_id = $pallet_id) ORDER BY time",
         "format": "time_series", "refId": "A"
       }]
     },
@@ -307,7 +326,7 @@
         ]
       },
       "targets": [{
-        "rawSql": "SELECT time, wrap_time_s, wrap_transit_time_s FROM sensor_readings WHERE device_id=1 AND $__timeFilter(time) ORDER BY time",
+        "rawSql": "SELECT time, wrap_time_s, wrap_transit_time_s FROM sensor_readings WHERE device_id=1 AND $__timeFilter(time) AND ($pallet_id = 0 OR pallet_id = $pallet_id) ORDER BY time",
         "format": "time_series", "refId": "A"
       }]
     },
@@ -345,7 +364,7 @@
         }
       },
       "targets": [{
-        "rawSql": "SELECT time, alarm_seconds FROM sensor_readings WHERE device_id=1 AND $__timeFilter(time) ORDER BY time",
+        "rawSql": "SELECT time, alarm_seconds FROM sensor_readings WHERE device_id=1 AND $__timeFilter(time) AND ($pallet_id = 0 OR pallet_id = $pallet_id) ORDER BY time",
         "format": "time_series", "refId": "A"
       }]
     },
@@ -376,7 +395,7 @@
         }
       },
       "targets": [{
-        "rawSql": "SELECT time, pallet_rotations FROM sensor_readings WHERE device_id=1 AND $__timeFilter(time) ORDER BY time",
+        "rawSql": "SELECT time, pallet_rotations FROM sensor_readings WHERE device_id=1 AND $__timeFilter(time) AND ($pallet_id = 0 OR pallet_id = $pallet_id) ORDER BY time",
         "format": "time_series", "refId": "A"
       }]
     },
@@ -493,7 +512,7 @@
         ]
       },
       "targets": [{
-        "rawSql": "SELECT time, sequence, state_name, pallet_id, wrap_time_s, wrap_transit_time_s, pallet_rotations, running_seconds, alarm_seconds FROM sensor_readings WHERE device_id=1 AND $__timeFilter(time) ORDER BY time DESC LIMIT 100",
+        "rawSql": "SELECT time, sequence, state_name, pallet_id, wrap_time_s, wrap_transit_time_s, pallet_rotations, running_seconds, alarm_seconds FROM sensor_readings WHERE device_id=1 AND $__timeFilter(time) AND ($pallet_id = 0 OR pallet_id = $pallet_id) ORDER BY time DESC LIMIT 100",
         "format": "table", "refId": "A"
       }]
     }

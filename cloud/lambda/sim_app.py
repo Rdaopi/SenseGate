@@ -233,11 +233,10 @@ def sms():
             stored = False
             try:
                 conn = _get_db()
-                # SMS is a store-and-forward backup path — always insert even if
-                # the same sequence arrived via /ingest (different source tag).
-                _insert_reading(conn, reading, from_number)
-                conn.commit()
-                stored = True
+                if not _is_duplicate(conn, reading["device_id"], reading["sequence"]):
+                    _insert_reading(conn, reading, from_number)
+                    conn.commit()
+                    stored = True
             except Exception as exc:
                 logger.error("DB error: %s", exc)
                 try:
