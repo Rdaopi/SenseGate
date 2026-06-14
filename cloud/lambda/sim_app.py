@@ -205,16 +205,21 @@ def sms():
         found = None
         guess = 0
         last_exc = None
+        visited = set()
         for _ in range(65536):
+            if guess in visited:
+                guess = (guess + 1) & 0xFFFF
+                if guess in visited:
+                    break
+            visited.add(guess)
             try:
                 pt = decrypt(ct, device_id, guess)
-                reading = parse(pt)
+                reading = parse(pt)  # raises ValueError on CRC mismatch
                 if reading["sequence"] == guess:
                     found = (guess, reading)
                     break
                 guess = reading["sequence"]
             except ValueError as exc:
-                # CRC mismatch with current guess — try next sequence number
                 last_exc = exc
                 guess = (guess + 1) & 0xFFFF
             except Exception as exc:
